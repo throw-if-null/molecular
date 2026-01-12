@@ -1,4 +1,4 @@
-package silicon
+package silicon_test
 
 import (
 	"context"
@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/throw-if-null/molecular/internal/api"
+	"github.com/throw-if-null/molecular/internal/silicon"
 	"github.com/throw-if-null/molecular/internal/store"
 	_ "modernc.org/sqlite"
 )
@@ -53,7 +54,7 @@ func TestCarbonWorker_creates_attempt_and_transitions(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cancelFn := StartCarbonWorker(ctx, s, td)
+	cancelFn := silicon.StartCarbonWorker(ctx, s, td)
 	defer cancelFn()
 
 	// wait for worker to do its job
