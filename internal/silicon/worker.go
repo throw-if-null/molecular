@@ -2,6 +2,8 @@ package silicon
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/throw-if-null/molecular/internal/lithium"
@@ -38,6 +40,49 @@ func StartLithiumWorker(ctx context.Context, s Store, repoRoot string, exe lithi
 						_, _ = r.EnsureWorktree(ctx)
 						// transition phase to carbon
 						_ = s.UpdateTaskPhaseAndStatus(t.TaskID, "carbon", "running")
+					}
+				}
+			}
+		}
+	}()
+	return cancel
+}
+
+// StartCarbonWorker starts a background goroutine that polls for tasks in phase 'carbon'
+// and runs a stubbed carbon worker in-process. It creates attempt records and writes
+// placeholder artifacts (carbon_result.json, log.txt) under the attempt artifacts dir.
+// After a successful stub run the task is transitioned to phase 'helium'.
+func StartCarbonWorker(ctx context.Context, s Store, repoRoot string) context.CancelFunc {
+	ctx, cancel := context.WithCancel(ctx)
+	go func() {
+		ticker := time.NewTicker(1 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				tasks, err := s.ListTasks(0)
+				if err != nil {
+					continue
+				}
+				for _, t := range tasks {
+					if t.Phase == "carbon" && t.Status == "running" {
+						// create attempt
+						attemptID, artifactsDir, err := s.CreateAttempt(t.TaskID, "carbon")
+						if err != nil {
+							continue
+						}
+						// ensure dir exists under repoRoot
+						fullDir := filepath.Join(repoRoot, artifactsDir)
+						_ = os.MkdirAll(fullDir, 0o755)
+						// write placeholder result and log
+						_ = os.WriteFile(filepath.Join(fullDir, "carbon_result.json"), []byte(`{"summary":"stub","complexity":"unknown"}`), 0o644)
+						_ = os.WriteFile(filepath.Join(fullDir, "log.txt"), []byte("carbon stub run\n"), 0o644)
+						// mark attempt ok
+						_ = s.UpdateAttemptStatus(attemptID, "ok", "")
+						// transition task to helium (keep status running)
+						_ = s.UpdateTaskPhaseAndStatus(t.TaskID, "helium", "running")
 					}
 				}
 			}

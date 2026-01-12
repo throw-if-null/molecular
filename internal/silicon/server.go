@@ -19,6 +19,9 @@ type Store interface {
 	ListTasks(limit int) ([]*api.Task, error)
 	CancelTask(taskID string) (bool, error)
 	UpdateTaskPhaseAndStatus(taskID, phase, status string) error
+	// Attempt management for workers
+	CreateAttempt(taskID, role string) (int64, string, error)
+	UpdateAttemptStatus(attemptID int64, status, errorSummary string) error
 }
 
 func NewServer(store Store) *Server {

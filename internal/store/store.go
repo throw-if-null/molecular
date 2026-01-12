@@ -228,3 +228,70 @@ func contains(s, substr string) bool {
 func (s *Store) String() string {
 	return fmt.Sprintf("store(%p)", s)
 }
+
+// CreateAttempt creates a new attempt row for the given task and role.
+// Returns the inserted attempt id and the artifacts_dir (relative path).
+func (s *Store) CreateAttempt(taskID, role string) (int64, string, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, "", err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// compute next attempt_num
+	var maxNum sql.NullInt64
+	if err := tx.QueryRow(`SELECT MAX(attempt_num) FROM attempts WHERE task_id = ? AND role = ?`, taskID, role).Scan(&maxNum); err != nil {
+		return 0, "", err
+	}
+	next := int64(1)
+	if maxNum.Valid {
+		next = maxNum.Int64 + 1
+	}
+
+	// artifacts dir normalized as .molecular/runs/<task_id>/<role>/<attempt_id> (we don't know id yet, so use a temporary placeholder and update after insert)
+	// insert with empty artifacts_dir first
+	res, err := tx.Exec(`INSERT INTO attempts (task_id, role, attempt_num, status, started_at, artifacts_dir) VALUES (?, ?, ?, ?, ?, ?)`, taskID, role, next, "running", time.Now().UTC().Format(time.RFC3339Nano), "")
+	if err != nil {
+		return 0, "", err
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return 0, "", err
+	}
+
+	artifactsDir := filepath.ToSlash(filepath.Join(".molecular", "runs", taskID, role, fmt.Sprintf("%d", id)))
+
+	if _, err := tx.Exec(`UPDATE attempts SET artifacts_dir = ? WHERE id = ?`, artifactsDir, id); err != nil {
+		return 0, "", err
+	}
+
+	if _, err := tx.Exec(`UPDATE tasks SET current_attempt_id = ? WHERE task_id = ?`, id, taskID); err != nil {
+		return 0, "", err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, "", err
+	}
+	return id, artifactsDir, nil
+}
+
+// UpdateAttemptStatus updates an attempt's status, finished_at and error_summary.
+// It also clears the task's current_attempt_id when finishing.
+func (s *Store) UpdateAttemptStatus(attemptID int64, status, errorSummary string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.Exec(`UPDATE attempts SET status = ?, finished_at = ?, error_summary = ? WHERE id = ?`, status, time.Now().UTC().Format(time.RFC3339Nano), errorSummary, attemptID); err != nil {
+		return err
+	}
+
+	// clear current_attempt_id on tasks if it matches this attempt
+	if _, err := tx.Exec(`UPDATE tasks SET current_attempt_id = NULL WHERE current_attempt_id = ?`, attemptID); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
