@@ -2,6 +2,7 @@ package silicon_test
 
 import (
 	"context"
+	"database/sql"
 	"os"
 	"path/filepath"
 	"strings"
@@ -90,6 +91,14 @@ func TestRetrySemantics_HeliumTransient(t *testing.T) {
 	// and the status transition can lag; checking the DB counters directly
 	// makes the test stable while keeping behavior checks minimal.
 	deadline := time.Now().Add(15 * time.Second)
+
+	// previous state for change-detection logging
+	var prevHR int = -1
+	var prevAttempts int = -1
+	var prevPhase string = ""
+	var prevStatus api.TaskStatus = ""
+	var prevCurrentAttemptID int64 = -2 // -2 means unknown, -1 means nil
+
 	for time.Now().Before(deadline) {
 		task, err := s.GetTask(taskID)
 		if err != nil {
@@ -118,7 +127,21 @@ func TestRetrySemantics_HeliumTransient(t *testing.T) {
 			t.Fatalf("count helium attempts: %v", err)
 		}
 
-		t.Logf("helium_retries=%d attempts=%d phase=%s status=%s", hr, attempts, task.Phase, task.Status)
+		// determine current_attempt_id value (nil -> -1)
+		var curAttemptID int64 = -1
+		if task.CurrentAttemptID != nil {
+			curAttemptID = *task.CurrentAttemptID
+		}
+
+		// only log on change to reduce spam
+		if hr != prevHR || attempts != prevAttempts || task.Phase != prevPhase || task.Status != prevStatus || curAttemptID != prevCurrentAttemptID {
+			t.Logf("helium_retries=%d attempts=%d phase=%s status=%s current_attempt_id=%d", hr, attempts, task.Phase, task.Status, curAttemptID)
+			prevHR = hr
+			prevAttempts = attempts
+			prevPhase = task.Phase
+			prevStatus = task.Status
+			prevCurrentAttemptID = curAttemptID
+		}
 
 		// Success condition: helium_retries has reached (or exceeded) the
 		// configured HeliumBudget and the attempts table has at least as many
@@ -132,6 +155,87 @@ func TestRetrySemantics_HeliumTransient(t *testing.T) {
 		}
 
 		time.Sleep(20 * time.Millisecond)
+	}
+
+	// deadline exceeded: dump helpful diagnostics from DB and fail
+	// try a few times to avoid transient "database is locked" errors
+	const dumpRetries = 5
+	var lastErr error
+	for i := 0; i < dumpRetries; i++ {
+		// dump task row
+		var taskIDd string
+		var phase string
+		var status string
+		var currentAttempt sql.NullInt64
+		var heliumRetries int
+		var updatedAt string
+		var heliumBudget int
+		q := "SELECT task_id, phase, status, current_attempt_id, helium_retries, updated_at, helium_budget FROM tasks WHERE task_id = ?"
+		err := db.QueryRow(q, taskID).Scan(&taskIDd, &phase, &status, &currentAttempt, &heliumRetries, &updatedAt, &heliumBudget)
+		if err != nil {
+			lastErr = err
+			if strings.Contains(err.Error(), "database is locked") {
+				time.Sleep(20 * time.Millisecond)
+				continue
+			}
+			break
+		}
+		t.Logf("TASK DUMP: task_id=%s phase=%s status=%s current_attempt_id=%v helium_retries=%d updated_at=%s helium_budget=%d", taskIDd, phase, status, currentAttempt, heliumRetries, updatedAt, heliumBudget)
+
+		// dump latest N attempts for this task and role helium
+		rows, err := db.Query("SELECT id, role, attempt_num, status, started_at, finished_at, error_summary FROM attempts WHERE task_id = ? AND role = 'helium' ORDER BY id DESC LIMIT 10", taskID)
+		if err != nil {
+			lastErr = err
+			if strings.Contains(err.Error(), "database is locked") {
+				time.Sleep(20 * time.Millisecond)
+				continue
+			}
+			break
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id int64
+			var role string
+			var attemptNum int64
+			var astatus string
+			var startedAt sql.NullString
+			var finishedAt sql.NullString
+			var errSummary sql.NullString
+			if err := rows.Scan(&id, &role, &attemptNum, &astatus, &startedAt, &finishedAt, &errSummary); err != nil {
+				lastErr = err
+				break
+			}
+			t.Logf("ATTEMPT: id=%d role=%s attempt_num=%d status=%s started_at=%v finished_at=%v error_summary=%v", id, role, attemptNum, astatus, startedAt, finishedAt, errSummary)
+		}
+
+		// if current attempt id present, dump that attempt row as well
+		if currentAttempt.Valid {
+			var id int64
+			var role string
+			var attemptNum int64
+			var astatus string
+			var startedAt sql.NullString
+			var finishedAt sql.NullString
+			var errSummary sql.NullString
+			err := db.QueryRow("SELECT id, role, attempt_num, status, started_at, finished_at, error_summary FROM attempts WHERE id = ?", currentAttempt.Int64).Scan(&id, &role, &attemptNum, &astatus, &startedAt, &finishedAt, &errSummary)
+			if err != nil {
+				lastErr = err
+				if strings.Contains(err.Error(), "database is locked") {
+					time.Sleep(20 * time.Millisecond)
+					continue
+				}
+				// otherwise, log the error and continue
+				t.Logf("error fetching current attempt %d: %v", currentAttempt.Int64, err)
+			} else {
+				t.Logf("CURRENT ATTEMPT: id=%d role=%s attempt_num=%d status=%s started_at=%v finished_at=%v error_summary=%v", id, role, attemptNum, astatus, startedAt, finishedAt, errSummary)
+			}
+		}
+
+		// finished dumping
+		break
+	}
+	if lastErr != nil {
+		t.Fatalf("deadline exceeded waiting for helium retries (dumping diagnostics failed): %v", lastErr)
 	}
 	t.Fatalf("deadline exceeded waiting for helium retries")
 }
