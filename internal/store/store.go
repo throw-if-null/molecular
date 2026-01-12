@@ -16,6 +16,8 @@ type Store struct {
 
 var ErrNotFound = errors.New("not found")
 
+var ErrInProgress = errors.New("attempt in progress")
+
 func isNotFound(err error) bool {
 	return errors.Is(err, ErrNotFound) || errors.Is(err, sql.ErrNoRows)
 }
@@ -256,6 +258,18 @@ func (s *Store) CreateAttempt(taskID, role string) (int64, string, int64, string
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	// ensure no current_attempt_id is set for this task
+	var current sql.NullInt64
+	if err := tx.QueryRow(`SELECT current_attempt_id FROM tasks WHERE task_id = ?`, taskID).Scan(&current); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, "", 0, "", ErrNotFound
+		}
+		return 0, "", 0, "", err
+	}
+	if current.Valid {
+		return 0, "", 0, "", ErrInProgress
+	}
+
 	// compute next attempt_num
 	var maxNum sql.NullInt64
 	if err := tx.QueryRow(`SELECT MAX(attempt_num) FROM attempts WHERE task_id = ? AND role = ?`, taskID, role).Scan(&maxNum); err != nil {
@@ -284,7 +298,8 @@ func (s *Store) CreateAttempt(taskID, role string) (int64, string, int64, string
 		return 0, "", 0, "", err
 	}
 
-	if _, err := tx.Exec(`UPDATE tasks SET current_attempt_id = ? WHERE task_id = ?`, id, taskID); err != nil {
+	// set current_attempt_id only if still null (defensive)
+	if _, err := tx.Exec(`UPDATE tasks SET current_attempt_id = ? WHERE task_id = ? AND current_attempt_id IS NULL`, id, taskID); err != nil {
 		return 0, "", 0, "", err
 	}
 
@@ -293,9 +308,6 @@ func (s *Store) CreateAttempt(taskID, role string) (int64, string, int64, string
 	}
 	return id, artifactsDir, next, startedAt, nil
 }
-
-// UpdateAttemptStatus updates an attempt's status, finished_at and error_summary.
-// It also clears the task's current_attempt_id when finishing.
 func (s *Store) UpdateAttemptStatus(attemptID int64, status, errorSummary string) error {
 	tx, err := s.db.Begin()
 	if err != nil {
