@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/throw-if-null/molecular/internal/api"
@@ -178,4 +179,66 @@ func captureStderr(w *bytes.Buffer) (*os.File, *os.File) {
 func restoreStderr(old *os.File, wpipe *os.File) {
 	_ = wpipe.Close()
 	os.Stderr = old
+}
+
+func TestDoctorCommand(t *testing.T) {
+	// create a temp repo dir
+	d, err := os.MkdirTemp("", "molecular-doctor-test-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(d)
+	// create .molecular and a non-executable hook file
+	mm := filepath.Join(d, ".molecular")
+	if err := os.Mkdir(mm, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := filepath.Join(mm, "config.toml")
+	if err := os.WriteFile(cfg, []byte("x=1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// create hooks: one executable, one not
+	lith := filepath.Join(mm, "lithium.sh")
+	chlor := filepath.Join(mm, "chlorine.sh")
+	if err := os.WriteFile(lith, []byte("echo hi\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(chlor, []byte("echo bye\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// stub execLookPath to succeed for git and fail for gh
+	oldLook := execLookPath
+	execLookPath = func(name string) (string, error) {
+		if name == "git" {
+			return "/usr/bin/git", nil
+		}
+		return "", fmt.Errorf("not found")
+	}
+	defer func() { execLookPath = oldLook }()
+
+	// run doctor in that dir
+	oldWd, _ := os.Getwd()
+	_ = os.Chdir(d)
+	defer os.Chdir(oldWd)
+
+	out := &bytes.Buffer{}
+	code := doctorWithIO([]string{}, out, out)
+	if code != 1 { // chlorine.sh not executable -> problem -> exit 1
+		t.Fatalf("expected exit 1, got %d, out=%s", code, out.String())
+	}
+
+	// JSON mode
+	out.Reset()
+	code = doctorWithIO([]string{"--json"}, out, out)
+	if code != 1 {
+		t.Fatalf("expected exit 1 in json mode, got %d", code)
+	}
+	var rep map[string]interface{}
+	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+		t.Fatalf("invalid json: %v, out=%s", err, out.String())
+	}
+	if rep["git"] != true {
+		t.Fatalf("expected git true in json report")
+	}
 }
