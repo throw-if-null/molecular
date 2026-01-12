@@ -84,17 +84,19 @@ func StartLithiumWorker(ctx context.Context, s Store, repoRoot string, exe lithi
 						hookPath := filepath.Join(repoRoot, ".molecular", "lithium.sh")
 						// only run on unix-like systems when executable
 						if fi, err := os.Stat(hookPath); err == nil {
+							// diagnostic: record mode
+							hookOut = "hook found\nmode=" + fi.Mode().String() + "\n"
 							if runtime.GOOS == "windows" {
-								hookOut = "skipped lithium.sh on windows\n"
+								hookOut += "skipped lithium.sh on windows\n"
 							} else if fi.Mode()&0111 == 0 {
-								hookOut = "lithium.sh exists but not executable, skipping\n"
+								hookOut += "lithium.sh exists but not executable, skipping\n"
 							} else {
 								cmd := exec.CommandContext(ctx, hookPath)
 								if wtPath != "" {
 									cmd.Dir = wtPath
 								}
 								out, err := cmd.CombinedOutput()
-								hookOut = string(out)
+								hookOut += string(out)
 								hookErr = err
 							}
 						}
