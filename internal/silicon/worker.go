@@ -285,7 +285,13 @@ func StartCarbonWorker(ctx context.Context, s Store, repoRoot string, runner Com
 							updateTaskPhaseWithRetries(s, t.TaskID, "carbon", "failed")
 							continue
 						}
-						ec, err := runner.Run(ctx, wtFull, carbonCmd, nil, logf, logf)
+						// run attempt-scoped so the cancel endpoint can interrupt this run
+						attemptCtx, attemptCancel := context.WithCancel(ctx)
+						RegisterAttemptCanceler(t.TaskID, attemptCancel)
+						defer UnregisterAttemptCanceler(t.TaskID)
+						defer attemptCancel()
+
+						ec, err := runner.Run(attemptCtx, wtFull, carbonCmd, nil, logf, logf)
 						finishedAt := time.Now().UTC().Format(time.RFC3339Nano)
 						_, _ = logf.WriteString("finished_at: " + finishedAt + "\n")
 						_, _ = logf.WriteString("exit_code: ")
