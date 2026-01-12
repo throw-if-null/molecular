@@ -3,6 +3,7 @@ package silicon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -48,8 +49,10 @@ func StartLithiumWorker(ctx context.Context, s Store, repoRoot string, exe lithi
 						// create attempt record (role = 'lithium')
 						attemptID, artifactsDir, _, startedAt, err := s.CreateAttempt(t.TaskID, "lithium")
 						if err != nil {
-							// can't create attempt, mark task failed
-							_ = s.UpdateTaskPhaseAndStatus(t.TaskID, "lithium", "failed")
+							// if someone else claimed the task, skip; otherwise mark failed
+							if !errors.Is(err, ErrInProgress) {
+								_ = s.UpdateTaskPhaseAndStatus(t.TaskID, "lithium", "failed")
+							}
 							continue
 						}
 
