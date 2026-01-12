@@ -57,7 +57,7 @@ func main() {
 	}
 	lithCancel := silicon.StartLithiumWorker(ctx, s, repoRoot, &lithium.RealExecRunner{}, poll)
 	defer lithCancel()
-	carbonCancel := silicon.StartCarbonWorker(ctx, s, repoRoot, poll)
+	carbonCancel := silicon.StartCarbonWorker(ctx, s, repoRoot, &silicon.RealCommandRunner{}, cfgRes.Config.Workers.CarbonCommand, poll)
 	defer carbonCancel()
 	heliumCancel := silicon.StartHeliumWorker(ctx, s, repoRoot, poll)
 	defer heliumCancel()
