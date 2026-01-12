@@ -22,6 +22,10 @@ type Store interface {
 	// Attempt management for workers
 	CreateAttempt(taskID, role string) (int64, string, error)
 	UpdateAttemptStatus(attemptID int64, status, errorSummary string) error
+	// Retry counters
+	IncrementCarbonRetries(taskID string) (int, error)
+	IncrementHeliumRetries(taskID string) (int, error)
+	IncrementReviewRetries(taskID string) (int, error)
 }
 
 func NewServer(store Store) *Server {
