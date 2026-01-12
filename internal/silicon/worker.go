@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"os"
 	"os/exec"
@@ -197,11 +198,12 @@ func updateTaskPhaseWithRetries(s Store, taskID, phase, status string) {
 }
 
 // StartCarbonWorker starts a background goroutine that polls for tasks in phase 'carbon'
-// and runs a stubbed carbon worker in-process. It creates attempt records and writes
-// placeholder artifacts (carbon_result.json, log.txt) under the attempt artifacts dir.
-// After a successful stub run the task is transitioned to phase 'helium'.
-// interval controls the worker polling interval. If zero, defaults to 1s.
-func StartCarbonWorker(ctx context.Context, s Store, repoRoot string, interval time.Duration) context.CancelFunc {
+// and runs the configured carbon command in the task worktree. It writes artifacts
+// (result.json, log.txt) under the attempt artifacts dir. After a successful run
+// the task is transitioned to phase 'helium'. It accepts a CommandRunner which
+// abstracts execution for tests. interval controls the worker polling interval. If
+// zero, defaults to 1s.
+func StartCarbonWorker(ctx context.Context, s Store, repoRoot string, runner CommandRunner, carbonCmd []string, interval time.Duration) context.CancelFunc {
 	ctx, cancel := context.WithCancel(ctx)
 	go func() {
 		if interval <= 0 {
@@ -220,44 +222,34 @@ func StartCarbonWorker(ctx context.Context, s Store, repoRoot string, interval t
 				}
 				for _, t := range tasks {
 					if t.Phase == "carbon" && t.Status == "running" {
-						// check previous attempt for crash recovery note
 						crashNote := ""
 						if prev, perr := s.GetLatestAttemptByRole(t.TaskID, "carbon"); perr == nil {
 							if strings.Contains(prev.ErrorSummary, "crash recovery") {
 								crashNote = "previous run crashed; continue from artifacts\n"
 							}
 						}
-						// create attempt
 						attemptID, artifactsDir, attemptNum, startedAt, err := s.CreateAttempt(t.TaskID, "carbon")
 						if err != nil {
 							continue
 						}
-						// if task was cancelled between polling and attempt creation,
-						// mark the attempt cancelled and skip doing work.
 						if cancelled, cerr := s.IsTaskCancelled(t.TaskID); cerr == nil && cancelled {
 							fullDir, ferr := paths.SafeJoin(repoRoot, artifactsDir)
 							if ferr != nil {
-								// skip attempt if path unsafe
 								_, _ = s.UpdateAttemptStatus(attemptID, "failed", ferr.Error())
 								continue
 							}
-
 							_ = os.MkdirAll(fullDir, 0o755)
 							_ = os.WriteFile(filepath.Join(fullDir, "result.json"), []byte(`{"status":"cancelled","role":"carbon"}`), 0o644)
 							_ = os.WriteFile(filepath.Join(fullDir, "log.txt"), []byte(crashNote+"cancelled\n"), 0o644)
 							_, _ = s.UpdateAttemptStatus(attemptID, "cancelled", "cancelled")
 							continue
 						}
-						// ensure dir exists under repoRoot
 						fullDir, ferr := paths.SafeJoin(repoRoot, artifactsDir)
 						if ferr != nil {
-							// skip attempt if path unsafe
 							_, _ = s.UpdateAttemptStatus(attemptID, "failed", ferr.Error())
 							continue
 						}
-
 						_ = os.MkdirAll(fullDir, 0o755)
-						// write meta, placeholder result and log
 						meta := map[string]interface{}{
 							"task_id":     t.TaskID,
 							"attempt_id":  attemptID,
@@ -269,12 +261,53 @@ func StartCarbonWorker(ctx context.Context, s Store, repoRoot string, interval t
 						if mb, err := json.Marshal(meta); err == nil {
 							_ = os.WriteFile(filepath.Join(fullDir, "meta.json"), mb, 0o644)
 						}
-						_ = os.WriteFile(filepath.Join(fullDir, "result.json"), []byte(`{"summary":"stub","complexity":"unknown","role":"carbon","status":"running"}`), 0o644)
-						_ = os.WriteFile(filepath.Join(fullDir, "log.txt"), []byte(crashNote+"carbon stub run\n"), 0o644)
-						// simulate transient failure deterministically based on prompt
-						if strings.Contains(t.Prompt, "carbon-fail") {
-							newCount, err := s.UpdateAttemptStatus(attemptID, "failed", "transient failure")
-							if err != nil {
+						logf, lerr := os.Create(filepath.Join(fullDir, "log.txt"))
+						if lerr != nil {
+							_, _ = s.UpdateAttemptStatus(attemptID, "failed", lerr.Error())
+							updateTaskPhaseWithRetries(s, t.TaskID, "carbon", "failed")
+							continue
+						}
+						_, _ = logf.WriteString("command: ")
+						_, _ = logf.WriteString(strings.Join(carbonCmd, " ") + "\n")
+						_, _ = logf.WriteString("workdir: " + t.WorktreePath + "\n")
+						_, _ = logf.WriteString("started_at: " + startedAt + "\n")
+						wtFull := ""
+						if t.WorktreePath != "" {
+							if p, perr := paths.SafeJoin(repoRoot, t.WorktreePath); perr == nil {
+								wtFull = p
+							}
+						}
+						if wtFull == "" {
+							_, _ = logf.WriteString("missing worktree\n")
+							_ = logf.Close()
+							_ = os.WriteFile(filepath.Join(fullDir, "result.json"), []byte(`{"status":"failed","role":"carbon","exit_code":-1}`), 0o644)
+							_, _ = s.UpdateAttemptStatus(attemptID, "failed", "missing worktree")
+							updateTaskPhaseWithRetries(s, t.TaskID, "carbon", "failed")
+							continue
+						}
+						ec, err := runner.Run(ctx, wtFull, carbonCmd, nil, logf, logf)
+						finishedAt := time.Now().UTC().Format(time.RFC3339Nano)
+						_, _ = logf.WriteString("finished_at: " + finishedAt + "\n")
+						_, _ = logf.WriteString("exit_code: ")
+						_, _ = logf.WriteString(fmt.Sprintf("%d\n", ec))
+						_ = logf.Close()
+						resObj := map[string]interface{}{"role": "carbon"}
+						if err != nil {
+							if errors.Is(err, context.Canceled) {
+								resObj["status"] = "cancelled"
+								resObj["exit_code"] = ec
+								mb, _ := json.Marshal(resObj)
+								_ = os.WriteFile(filepath.Join(fullDir, "result.json"), mb, 0o644)
+								_, _ = s.UpdateAttemptStatus(attemptID, "cancelled", "cancelled")
+								_ = s.UpdateTaskPhaseAndStatus(t.TaskID, t.Phase, "cancelled")
+								continue
+							}
+							resObj["status"] = "failed"
+							resObj["exit_code"] = ec
+							mb, _ := json.Marshal(resObj)
+							_ = os.WriteFile(filepath.Join(fullDir, "result.json"), mb, 0o644)
+							newCount, uerr := s.UpdateAttemptStatus(attemptID, "failed", err.Error())
+							if uerr != nil {
 								updateTaskPhaseWithRetries(s, t.TaskID, "carbon", "failed")
 								continue
 							}
@@ -285,10 +318,11 @@ func StartCarbonWorker(ctx context.Context, s Store, repoRoot string, interval t
 							}
 							continue
 						}
-
-						// mark attempt ok
+						resObj["status"] = "succeeded"
+						resObj["exit_code"] = ec
+						mb, _ := json.Marshal(resObj)
+						_ = os.WriteFile(filepath.Join(fullDir, "result.json"), mb, 0o644)
 						_, _ = s.UpdateAttemptStatus(attemptID, "ok", "")
-						// transition task to helium (keep status running)
 						_ = s.UpdateTaskPhaseAndStatus(t.TaskID, "helium", "running")
 					}
 				}
