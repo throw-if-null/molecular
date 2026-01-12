@@ -41,8 +41,20 @@ func TestRetrySemantics_CarbonTransient(t *testing.T) {
 			t.Fatalf("get task: %v", err)
 		}
 		if task.Status == "failed" {
-			if task.CarbonRetries < task.CarbonBudget {
-				t.Fatalf("task failed before exhausting budget: %d < %d", task.CarbonRetries, task.CarbonBudget)
+			var cr int
+			if err := db.QueryRow("SELECT carbon_retries FROM tasks WHERE task_id = ?", taskID).Scan(&cr); err != nil {
+				t.Fatalf("query carbon_retries: %v", err)
+			}
+			if cr < task.CarbonBudget {
+				t.Fatalf("task failed before exhausting budget: %d < %d", cr, task.CarbonBudget)
+			}
+			// check attempts count
+			var attempts int
+			if err := db.QueryRow("SELECT COUNT(*) FROM attempts WHERE task_id = ? AND role = 'carbon'", taskID).Scan(&attempts); err != nil {
+				t.Fatalf("count attempts: %v", err)
+			}
+			if attempts < cr {
+				t.Fatalf("attempts (%d) < retries (%d)", attempts, cr)
 			}
 			return
 		}
@@ -76,8 +88,19 @@ func TestRetrySemantics_HeliumTransient(t *testing.T) {
 			t.Fatalf("get task: %v", err)
 		}
 		if task.Status == "failed" {
-			if task.HeliumRetries < task.HeliumBudget {
-				t.Fatalf("task failed before exhausting helium budget: %d < %d", task.HeliumRetries, task.HeliumBudget)
+			var hr int
+			if err := db.QueryRow("SELECT helium_retries FROM tasks WHERE task_id = ?", taskID).Scan(&hr); err != nil {
+				t.Fatalf("query helium_retries: %v", err)
+			}
+			if hr < task.HeliumBudget {
+				t.Fatalf("task failed before exhausting helium budget: %d < %d", hr, task.HeliumBudget)
+			}
+			var attempts int
+			if err := db.QueryRow("SELECT COUNT(*) FROM attempts WHERE task_id = ? AND role = 'helium'", taskID).Scan(&attempts); err != nil {
+				t.Fatalf("count helium attempts: %v", err)
+			}
+			if attempts < hr {
+				t.Fatalf("helium attempts (%d) < retries (%d)", attempts, hr)
 			}
 			return
 		}
@@ -114,14 +137,22 @@ func TestRetrySemantics_ReviewLoop(t *testing.T) {
 		}
 		// if helium wrote changes_requested artifact, it will have been an attempt; check review_retries
 		if task.Status == "failed" {
-			if task.ReviewRetries <= task.ReviewBudget {
-				t.Fatalf("task failed before exhausting review budget: %d <= %d", task.ReviewRetries, task.ReviewBudget)
+			var rr int
+			if err := db.QueryRow("SELECT review_retries FROM tasks WHERE task_id = ?", taskID).Scan(&rr); err != nil {
+				t.Fatalf("query review_retries: %v", err)
+			}
+			if rr <= task.ReviewBudget {
+				t.Fatalf("task failed before exhausting review budget: %d <= %d", rr, task.ReviewBudget)
 			}
 			return
 		}
 		// if it cycles back to carbon, ensure review_retries > 0 and helium writes artifact check exists
 		if task.Phase == "carbon" {
-			if task.ReviewRetries == 0 {
+			var rr int
+			if err := db.QueryRow("SELECT review_retries FROM tasks WHERE task_id = ?", taskID).Scan(&rr); err != nil {
+				t.Fatalf("query review_retries: %v", err)
+			}
+			if rr == 0 {
 				t.Fatalf("expected review_retries > 0 after helium requested changes")
 			}
 			// check that helium attempt artifact exists on disk at least once
