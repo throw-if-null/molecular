@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/throw-if-null/molecular/internal/lithium"
+	"github.com/throw-if-null/molecular/internal/store"
 )
 
 // StartLithiumWorker starts a background goroutine that polls for tasks in phase 'lithium'
@@ -50,7 +51,7 @@ func StartLithiumWorker(ctx context.Context, s Store, repoRoot string, exe lithi
 						attemptID, artifactsDir, _, startedAt, err := s.CreateAttempt(t.TaskID, "lithium")
 						if err != nil {
 							// if someone else claimed the task, skip; otherwise mark failed
-							if !errors.Is(err, ErrInProgress) {
+							if !errors.Is(err, store.ErrInProgress) {
 								_ = s.UpdateTaskPhaseAndStatus(t.TaskID, "lithium", "failed")
 							}
 							continue
