@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -80,5 +81,9 @@ func TestLoad_InvalidToml(t *testing.T) {
 	}
 	if res.ParseError == nil {
 		t.Fatalf("expected parse error")
+	}
+	// parse error should wrap ErrInvalid
+	if !errors.Is(res.ParseError, ErrInvalid) {
+		t.Fatalf("expected ErrInvalid wrap, got: %v", res.ParseError)
 	}
 }
