@@ -143,6 +143,24 @@ func StartLithiumWorker(ctx context.Context, s Store, repoRoot string, exe lithi
 	return cancel
 }
 
+// updateTaskPhaseWithRetries attempts to update task phase/status, retrying on
+// transient sqlite busy errors. Log a warning if it ultimately fails.
+func updateTaskPhaseWithRetries(s Store, taskID, phase, status string) {
+	const maxRetries = 5
+	for i := 0; i < maxRetries; i++ {
+		if err := s.UpdateTaskPhaseAndStatus(taskID, phase, status); err == nil {
+			return
+		} else if strings.Contains(err.Error(), "database is locked") || strings.Contains(err.Error(), "SQLITE_BUSY") {
+			time.Sleep(time.Duration(10*(1<<i)) * time.Millisecond)
+			continue
+		} else {
+			log.Printf("UpdateTaskPhaseAndStatus failed for %s: %v", taskID, err)
+			return
+		}
+	}
+	log.Printf("UpdateTaskPhaseAndStatus failed after retries for %s", taskID)
+}
+
 // StartCarbonWorker starts a background goroutine that polls for tasks in phase 'carbon'
 // and runs a stubbed carbon worker in-process. It creates attempt records and writes
 // placeholder artifacts (carbon_result.json, log.txt) under the attempt artifacts dir.
