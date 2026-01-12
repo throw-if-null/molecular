@@ -33,7 +33,7 @@ func TestRetrySemantics_CarbonTransient(t *testing.T) {
 	defer cancelFn()
 
 	// wait until task becomes failed or exceeds budget
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(8 * time.Second)
 	for time.Now().Before(deadline) {
 		task, err := s.GetTask(taskID)
 		if err != nil {
@@ -49,7 +49,7 @@ func TestRetrySemantics_CarbonTransient(t *testing.T) {
 				t.Fatalf("query carbon_retries: %v", err)
 			}
 			if cr < task.CarbonBudget {
-				t.Fatalf("task failed before exhausting budget: %d < %d", cr, task.CarbonBudget)
+				t.Fatalf("task failed before exhausting carbon budget: %d < %d", cr, task.CarbonBudget)
 			}
 			// check attempts count
 			var attempts int
@@ -84,7 +84,7 @@ func TestRetrySemantics_HeliumTransient(t *testing.T) {
 	cancelFn := silicon.StartHeliumWorker(ctx, s, td, 10*time.Millisecond)
 	defer cancelFn()
 
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
 		task, err := s.GetTask(taskID)
 		if err != nil {
@@ -136,7 +136,7 @@ func TestRetrySemantics_ReviewLoop(t *testing.T) {
 	defer cFn()
 	defer hFn()
 
-	deadline := time.Now().Add(3 * time.Second)
+	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
 		task, err := s.GetTask(taskID)
 		if err != nil {

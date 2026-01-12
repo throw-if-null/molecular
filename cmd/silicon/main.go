@@ -1,14 +1,18 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/throw-if-null/molecular/internal/api"
+	"github.com/throw-if-null/molecular/internal/config"
+	"github.com/throw-if-null/molecular/internal/lithium"
 	"github.com/throw-if-null/molecular/internal/silicon"
 	"github.com/throw-if-null/molecular/internal/store"
 	"github.com/throw-if-null/molecular/internal/version"
@@ -32,6 +36,27 @@ func main() {
 	if err := s.Init(); err != nil {
 		log.Fatalf("failed to init schema: %v", err)
 	}
+
+	repoRoot, err := os.Getwd()
+	if err != nil {
+		log.Fatalf("failed to get cwd: %v", err)
+	}
+
+	cfgRes := config.Load(repoRoot)
+	if cfgRes.ParseError != nil {
+		log.Fatalf("failed to parse config at %s: %v", cfgRes.Path, cfgRes.ParseError)
+	}
+
+	poll := time.Duration(cfgRes.Config.Silicon.PollIntervalMS) * time.Millisecond
+	ctx := context.Background()
+	lithCancel := silicon.StartLithiumWorker(ctx, s, repoRoot, &lithium.RealExecRunner{}, poll)
+	defer lithCancel()
+	carbonCancel := silicon.StartCarbonWorker(ctx, s, repoRoot, poll)
+	defer carbonCancel()
+	heliumCancel := silicon.StartHeliumWorker(ctx, s, repoRoot, poll)
+	defer heliumCancel()
+	chlorineCancel := silicon.StartChlorineWorker(ctx, s, repoRoot, poll)
+	defer chlorineCancel()
 
 	srv := silicon.NewServer(s)
 	addr := fmt.Sprintf("%s:%d", api.DefaultHost, api.DefaultPort)

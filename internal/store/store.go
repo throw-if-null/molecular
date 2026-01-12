@@ -16,16 +16,8 @@ type Store struct {
 
 var ErrNotFound = errors.New("not found")
 
-type Attempt struct {
-	ID           int64
-	TaskID       string
-	Role         string
-	AttemptNum   int64
-	Status       string
-	StartedAt    string
-	FinishedAt   string
-	ArtifactsDir string
-	ErrorSummary string
+func isNotFound(err error) bool {
+	return errors.Is(err, ErrNotFound) || errors.Is(err, sql.ErrNoRows)
 }
 
 func New(db *sql.DB) *Store {
@@ -101,19 +93,32 @@ CREATE TABLE IF NOT EXISTS attempts (
 }
 
 func (s *Store) CreateTaskOrGetExisting(r *api.CreateTaskRequest) (*api.Task, bool, error) {
+	// Preserve original behavior by delegating to CreateTaskWithBudgets
+	// using the DB/schema defaults (3,3,2) so existing callers are unaffected.
+	return s.CreateTaskWithBudgets(r, 3, 3, 2)
+}
+
+// CreateTaskWithBudgets creates a task row setting per-task budgets. Returns
+// the created task (or existing) and a boolean indicating whether it already
+// existed. This allows callers (e.g. server) to pass configured budgets at
+// task creation time.
+func (s *Store) CreateTaskWithBudgets(r *api.CreateTaskRequest, carbonBudget, heliumBudget, reviewBudget int) (*api.Task, bool, error) {
 	createdAt := time.Now().UTC().Format(time.RFC3339Nano)
 	updatedAt := createdAt
 	artifactsRoot := filepath.ToSlash(filepath.Join(".molecular", "runs", r.TaskID))
 	worktreePath := filepath.ToSlash(filepath.Join(".molecular", "worktrees", r.TaskID))
 
 	_, err := s.db.Exec(
-		`INSERT INTO tasks (task_id, prompt, status, phase, created_at, updated_at, artifacts_root, worktree_path) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO tasks (task_id, prompt, status, phase, created_at, updated_at, carbon_budget, helium_budget, review_budget, artifacts_root, worktree_path) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		r.TaskID,
 		r.Prompt,
 		"running",
 		"lithium",
 		createdAt,
 		updatedAt,
+		carbonBudget,
+		heliumBudget,
+		reviewBudget,
 		artifactsRoot,
 		worktreePath,
 	)
@@ -310,15 +315,16 @@ func (s *Store) UpdateAttemptStatus(attemptID int64, status, errorSummary string
 	return tx.Commit()
 }
 
-func (s *Store) GetAttempt(taskID string, attemptID int64) (*Attempt, error) {
+func (s *Store) GetAttempt(taskID string, attemptID int64) (*api.Attempt, error) {
 	row := s.db.QueryRow(`
-SELECT id, task_id, role, attempt_num, status, started_at, COALESCE(finished_at, ''), artifacts_dir, COALESCE(error_summary, '')
-FROM attempts
-WHERE task_id = ? AND id = ?
-`, taskID, attemptID)
-	var a Attempt
+ SELECT id, task_id, role, attempt_num, status, started_at, COALESCE(finished_at, ''), artifacts_dir, COALESCE(error_summary, '')
+ FROM attempts
+ WHERE task_id = ? AND id = ?
+ `, taskID, attemptID)
+	var a api.Attempt
+
 	if err := row.Scan(&a.ID, &a.TaskID, &a.Role, &a.AttemptNum, &a.Status, &a.StartedAt, &a.FinishedAt, &a.ArtifactsDir, &a.ErrorSummary); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if isNotFound(err) {
 			return nil, ErrNotFound
 		}
 		return nil, err
@@ -326,17 +332,18 @@ WHERE task_id = ? AND id = ?
 	return &a, nil
 }
 
-func (s *Store) GetLatestAttempt(taskID string) (*Attempt, error) {
+func (s *Store) GetLatestAttempt(taskID string) (*api.Attempt, error) {
 	row := s.db.QueryRow(`
-SELECT id, task_id, role, attempt_num, status, started_at, COALESCE(finished_at, ''), artifacts_dir, COALESCE(error_summary, '')
-FROM attempts
-WHERE task_id = ?
-ORDER BY id DESC
-LIMIT 1
-`, taskID)
-	var a Attempt
+ SELECT id, task_id, role, attempt_num, status, started_at, COALESCE(finished_at, ''), artifacts_dir, COALESCE(error_summary, '')
+ FROM attempts
+ WHERE task_id = ?
+ ORDER BY id DESC
+ LIMIT 1
+ `, taskID)
+	var a api.Attempt
+
 	if err := row.Scan(&a.ID, &a.TaskID, &a.Role, &a.AttemptNum, &a.Status, &a.StartedAt, &a.FinishedAt, &a.ArtifactsDir, &a.ErrorSummary); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if isNotFound(err) {
 			return nil, ErrNotFound
 		}
 		return nil, err
@@ -344,17 +351,18 @@ LIMIT 1
 	return &a, nil
 }
 
-func (s *Store) GetLatestAttemptByRole(taskID string, role string) (*Attempt, error) {
+func (s *Store) GetLatestAttemptByRole(taskID string, role string) (*api.Attempt, error) {
 	row := s.db.QueryRow(`
-SELECT id, task_id, role, attempt_num, status, started_at, COALESCE(finished_at, ''), artifacts_dir, COALESCE(error_summary, '')
-FROM attempts
-WHERE task_id = ? AND role = ?
-ORDER BY id DESC
-LIMIT 1
-`, taskID, role)
-	var a Attempt
+ SELECT id, task_id, role, attempt_num, status, started_at, COALESCE(finished_at, ''), artifacts_dir, COALESCE(error_summary, '')
+ FROM attempts
+ WHERE task_id = ? AND role = ?
+ ORDER BY id DESC
+ LIMIT 1
+ `, taskID, role)
+	var a api.Attempt
+
 	if err := row.Scan(&a.ID, &a.TaskID, &a.Role, &a.AttemptNum, &a.Status, &a.StartedAt, &a.FinishedAt, &a.ArtifactsDir, &a.ErrorSummary); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if isNotFound(err) {
 			return nil, ErrNotFound
 		}
 		return nil, err
