@@ -8,7 +8,7 @@ import (
 // Simple in-memory registry of per-task cancellers so the cancel endpoint can
 // signal a running attempt quickly without waiting for a DB poll.
 var (
-	cancellersMu sync.Mutex
+	cancellersMu sync.RWMutex
 	cancellers   = map[string]context.CancelFunc{}
 )
 
@@ -30,9 +30,9 @@ func UnregisterAttemptCanceler(taskID string) {
 // CancelInMemory signals the registered cancel func for taskID if present.
 // Returns true if a cancel func was found and called.
 func CancelInMemory(taskID string) bool {
-	cancellersMu.Lock()
+	cancellersMu.RLock()
 	cancel, ok := cancellers[taskID]
-	cancellersMu.Unlock()
+	cancellersMu.RUnlock()
 	if !ok || cancel == nil {
 		return false
 	}
