@@ -177,6 +177,10 @@ func (s *Server) handleGetTaskLogs(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing task_id", http.StatusBadRequest)
 		return
 	}
+	if err := paths.ValidateTaskID(taskID); err != nil {
+		http.Error(w, "invalid task_id", http.StatusBadRequest)
+		return
+	}
 
 	// validate task exists
 	if _, err := s.store.GetTask(taskID); isNotFound(err) {
