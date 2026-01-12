@@ -39,6 +39,14 @@ func StartLithiumWorker(ctx context.Context, s Store, repoRoot string, exe lithi
 				}
 				for _, t := range tasks {
 					if t.Phase == "lithium" && t.Status == "running" {
+						// check previous attempt for crash recovery note
+						crashNote := ""
+						if prev, perr := s.GetLatestAttemptByRole(t.TaskID, "lithium"); perr == nil {
+							if strings.Contains(prev.ErrorSummary, "crash recovery") {
+								crashNote = "previous run crashed; continue from artifacts\n"
+							}
+						}
+
 						// process one task: create an attempt, ensure worktree and write lithium artifacts
 						cfg := lithium.Config{
 							RepoRoot:      repoRoot,
@@ -77,7 +85,7 @@ func StartLithiumWorker(ctx context.Context, s Store, repoRoot string, exe lithi
 								_ = os.WriteFile(filepath.Join(fullDir, "meta.json"), mb, 0o644)
 							}
 							_ = os.WriteFile(filepath.Join(fullDir, "result.json"), []byte(`{"status":"failed","role":"lithium"}`), 0o644)
-							_ = os.WriteFile(filepath.Join(fullDir, "log.txt"), []byte(err.Error()+"\n"), 0o644)
+							_ = os.WriteFile(filepath.Join(fullDir, "log.txt"), []byte(crashNote+err.Error()+"\n"), 0o644)
 							_, _ = s.UpdateAttemptStatus(attemptID, "failed", err.Error())
 							updateTaskPhaseWithRetries(s, t.TaskID, "lithium", "failed")
 							continue
