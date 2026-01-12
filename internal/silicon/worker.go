@@ -86,8 +86,19 @@ func StartCarbonWorker(ctx context.Context, s Store, repoRoot string, interval t
 						// ensure dir exists under repoRoot
 						fullDir := filepath.Join(repoRoot, artifactsDir)
 						_ = os.MkdirAll(fullDir, 0o755)
-						// write placeholder result and log
-						_ = os.WriteFile(filepath.Join(fullDir, "carbon_result.json"), []byte(`{"summary":"stub","complexity":"unknown"}`), 0o644)
+						// write meta, placeholder result and log
+						meta := map[string]interface{}{
+							"task_id":     t.TaskID,
+							"attempt_id":  attemptID,
+							"role":        "carbon",
+							"attempt_num": attemptNum,
+							"status":      "running",
+							"started_at":  startedAt,
+						}
+						if mb, err := json.Marshal(meta); err == nil {
+							_ = os.WriteFile(filepath.Join(fullDir, "meta.json"), mb, 0o644)
+						}
+						_ = os.WriteFile(filepath.Join(fullDir, "result.json"), []byte(`{"summary":"stub","complexity":"unknown","role":"carbon","status":"running"}`), 0o644)
 						_ = os.WriteFile(filepath.Join(fullDir, "log.txt"), []byte("carbon stub run\n"), 0o644)
 						// simulate transient failure deterministically based on prompt
 						if strings.Contains(t.Prompt, "carbon-fail") {
