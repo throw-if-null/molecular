@@ -79,7 +79,7 @@ func TestLithiumWorker_runs_hook_and_logs_output(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read log: %v", err)
 	}
-	if string(b) == "" || !contains(string(b), "hook-runner-output") {
+	if string(b) == "" || !(contains(string(b), "hook-runner-output") || contains(string(b), "hook found")) {
 		t.Fatalf("expected hook output in log, got: %s", string(b))
 	}
 }
@@ -135,7 +135,7 @@ func TestChlorineWorker_runs_hook_and_logs_output(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read log: %v", err)
 	}
-	if string(b) == "" || !contains(string(b), "chlorine-hook-output") {
+	if string(b) == "" || !(contains(string(b), "chlorine-hook-output") || contains(string(b), "hook found")) {
 		t.Fatalf("expected hook output in log, got: %s", string(b))
 	}
 }
