@@ -140,17 +140,21 @@ func TestListCancelLogsCleanup(t *testing.T) {
 		t.Fatalf("missing artifacts_root in logs")
 	}
 
-	// cleanup -> not implemented should return code 2 and print message to stderr
-	// capture stderr
-	serr := &bytes.Buffer{}
-	oldErr, werr := captureStderr(serr)
-	code = run([]string{"cleanup", "task-1"}, client, ts.URL, bytes.NewBuffer(nil), serr)
-	restoreStderr(oldErr, werr)
-	if code != 2 {
+	// cleanup -> should call endpoint and print JSON
+	buf.Reset()
+	oldOut, wout = captureStdout(buf)
+	code = run([]string{"cleanup", "task-1"}, client, ts.URL, buf, bytes.NewBuffer(nil))
+	restoreStdout(oldOut, wout)
+	if code != 0 {
 		t.Fatalf("cleanup exit code: %d", code)
 	}
-	if !bytes.Contains(serr.Bytes(), []byte("cleanup not implemented")) {
-		t.Fatalf("expected cleanup not implemented message, got: %s", serr.String())
+	b, _ = io.ReadAll(buf)
+	var cres map[string]interface{}
+	if err := json.Unmarshal(b, &cres); err != nil {
+		t.Fatalf("unmarshal cleanup: %v; body=%s", err, string(b))
+	}
+	if cres["artifacts"] != true || cres["worktree"] != true {
+		t.Fatalf("unexpected cleanup body: %v", cres)
 	}
 }
 
