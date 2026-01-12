@@ -58,7 +58,7 @@ func main() {
 	chlorineCancel := silicon.StartChlorineWorker(ctx, s, repoRoot, poll)
 	defer chlorineCancel()
 
-	srv := silicon.NewServer(s)
+	srv := silicon.NewServer(s, cfgRes.Config.Retry.CarbonBudget, cfgRes.Config.Retry.HeliumBudget, cfgRes.Config.Retry.ReviewBudget)
 	addr := fmt.Sprintf("%s:%d", api.DefaultHost, api.DefaultPort)
 	log.Printf("silicon %s (%s) listening on http://%s", version.Version, version.Commit, addr)
 	log.Fatal(http.ListenAndServe(addr, srv.Handler()))
