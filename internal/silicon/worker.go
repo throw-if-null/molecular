@@ -2,6 +2,7 @@ package silicon
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -78,7 +79,7 @@ func StartCarbonWorker(ctx context.Context, s Store, repoRoot string, interval t
 				for _, t := range tasks {
 					if t.Phase == "carbon" && t.Status == "running" {
 						// create attempt
-						attemptID, artifactsDir, err := s.CreateAttempt(t.TaskID, "carbon")
+						attemptID, artifactsDir, attemptNum, startedAt, err := s.CreateAttempt(t.TaskID, "carbon")
 						if err != nil {
 							continue
 						}
@@ -142,7 +143,7 @@ func StartHeliumWorker(ctx context.Context, s Store, repoRoot string, interval t
 				for _, t := range tasks {
 					if t.Phase == "helium" && t.Status == "running" {
 						// create attempt
-						attemptID, artifactsDir, err := s.CreateAttempt(t.TaskID, "helium")
+						attemptID, artifactsDir, attemptNum, startedAt, err := s.CreateAttempt(t.TaskID, "helium")
 						if err != nil {
 							continue
 						}
@@ -157,7 +158,7 @@ func StartHeliumWorker(ctx context.Context, s Store, repoRoot string, interval t
 								_ = s.UpdateTaskPhaseAndStatus(t.TaskID, "helium", "failed")
 								continue
 							}
-							_ = os.WriteFile(filepath.Join(fullDir, "helium_result.json"), []byte(`{"status":"failed"}`), 0o644)
+							_ = os.WriteFile(filepath.Join(fullDir, "result.json"), []byte(`{"status":"failed","role":"helium"}`), 0o644)
 							_ = os.WriteFile(filepath.Join(fullDir, "log.txt"), []byte("helium transient failure\n"), 0o644)
 							_ = s.UpdateAttemptStatus(attemptID, "failed", "transient failure")
 							if newCount >= t.HeliumBudget {
@@ -175,7 +176,7 @@ func StartHeliumWorker(ctx context.Context, s Store, repoRoot string, interval t
 								_ = s.UpdateTaskPhaseAndStatus(t.TaskID, "helium", "failed")
 								continue
 							}
-							_ = os.WriteFile(filepath.Join(fullDir, "helium_result.json"), []byte(`{"status":"changes_requested"}`), 0o644)
+							_ = os.WriteFile(filepath.Join(fullDir, "result.json"), []byte(`{"status":"changes_requested","role":"helium"}`), 0o644)
 							_ = os.WriteFile(filepath.Join(fullDir, "log.txt"), []byte("helium requested changes\n"), 0o644)
 							_ = s.UpdateAttemptStatus(attemptID, "ok", "changes requested")
 							if newCount > t.ReviewBudget {
@@ -188,7 +189,7 @@ func StartHeliumWorker(ctx context.Context, s Store, repoRoot string, interval t
 							continue
 						}
 						// otherwise approved
-						_ = os.WriteFile(filepath.Join(fullDir, "helium_result.json"), []byte(`{"status":"approved"}`), 0o644)
+						_ = os.WriteFile(filepath.Join(fullDir, "result.json"), []byte(`{"status":"approved","role":"helium"}`), 0o644)
 						_ = os.WriteFile(filepath.Join(fullDir, "log.txt"), []byte("helium stub run\n"), 0o644)
 						// mark attempt ok
 						_ = s.UpdateAttemptStatus(attemptID, "ok", "")
@@ -228,7 +229,7 @@ func StartChlorineWorker(ctx context.Context, s Store, repoRoot string, interval
 				for _, t := range tasks {
 					if t.Phase == "chlorine" && t.Status == "running" {
 						// create attempt
-						attemptID, artifactsDir, err := s.CreateAttempt(t.TaskID, "chlorine")
+						attemptID, artifactsDir, attemptNum, startedAt, err := s.CreateAttempt(t.TaskID, "chlorine")
 						if err != nil {
 							continue
 						}
