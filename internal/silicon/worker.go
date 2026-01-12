@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -76,7 +78,28 @@ func StartLithiumWorker(ctx context.Context, s Store, repoRoot string, exe lithi
 							continue
 						}
 
-						// write meta, result and log indicating success of worktree ensure
+						// run optional lithium hook under .molecular/lithium.sh
+						hookOut := ""
+						hookErr := error(nil)
+						hookPath := filepath.Join(repoRoot, ".molecular", "lithium.sh")
+						// only run on unix-like systems when executable
+						if fi, err := os.Stat(hookPath); err == nil {
+							if runtime.GOOS == "windows" {
+								hookOut = "skipped lithium.sh on windows\n"
+							} else if fi.Mode()&0111 == 0 {
+								hookOut = "lithium.sh exists but not executable, skipping\n"
+							} else {
+								cmd := exec.CommandContext(ctx, hookPath)
+								if wtPath != "" {
+									cmd.Dir = wtPath
+								}
+								out, err := cmd.CombinedOutput()
+								hookOut = string(out)
+								hookErr = err
+							}
+						}
+
+						// write meta, result and log indicating success or hook failure
 						meta := map[string]interface{}{
 							"task_id":       t.TaskID,
 							"attempt_id":    attemptID,
@@ -89,8 +112,16 @@ func StartLithiumWorker(ctx context.Context, s Store, repoRoot string, exe lithi
 							_ = os.WriteFile(filepath.Join(fullDir, "meta.json"), mb, 0o644)
 						}
 						_ = os.WriteFile(filepath.Join(fullDir, "result.json"), []byte(`{"status":"ok","role":"lithium"}`), 0o644)
-						// write a simple log entry
-						_ = os.WriteFile(filepath.Join(fullDir, "log.txt"), []byte("worktree ensured\n"), 0o644)
+						// write a log entry including worktree ensured and any hook output
+						logContent := "worktree ensured\n" + hookOut
+						_ = os.WriteFile(filepath.Join(fullDir, "log.txt"), []byte(logContent), 0o644)
+
+						if hookErr != nil {
+							// hook failed -> mark attempt and task failed
+							_ = s.UpdateAttemptStatus(attemptID, "failed", hookErr.Error())
+							_ = s.UpdateTaskPhaseAndStatus(t.TaskID, "lithium", "failed")
+							continue
+						}
 
 						// mark attempt ok
 						_ = s.UpdateAttemptStatus(attemptID, "ok", "")
