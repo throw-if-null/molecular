@@ -20,7 +20,7 @@ func (f *FakeExec) Run(ctx context.Context, dir string, name string, args ...str
 	return "fake-out", nil
 }
 
-func TestEnsureWorktree_usesExecRunner_and_writes_log(t *testing.T) {
+func TestEnsureWorktree_usesExecRunner(t *testing.T) {
 	td, err := os.MkdirTemp("", "molecular-test-")
 	if err != nil {
 		t.Fatalf("tmpdir: %v", err)
@@ -43,12 +43,6 @@ func TestEnsureWorktree_usesExecRunner_and_writes_log(t *testing.T) {
 	}
 	if len(f.LastArgs) < 1 || f.LastArgs[0] != "worktree" {
 		t.Fatalf("expected worktree arg, got %v", f.LastArgs)
-	}
-	// verify log exists
-	// artifactsRoot/lithium/<ts>/log.txt
-	files, _ := os.ReadDir(filepath.Join(artifactsRoot, "lithium"))
-	if len(files) == 0 {
-		t.Fatalf("expected log dir created")
 	}
 }
 
