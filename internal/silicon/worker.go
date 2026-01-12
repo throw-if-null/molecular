@@ -84,6 +84,13 @@ func StartLithiumWorker(ctx context.Context, s Store, repoRoot string, exe lithi
 
 						wtPath, err := r.EnsureWorktree(attemptCtx)
 						if err != nil {
+							if errors.Is(err, context.Canceled) {
+								_ = os.WriteFile(filepath.Join(fullDir, "result.json"), []byte(`{"status":"cancelled","role":"lithium"}`), 0o644)
+								_ = os.WriteFile(filepath.Join(fullDir, "log.txt"), []byte(crashNote+"cancelled\n"), 0o644)
+								_, _ = s.UpdateAttemptStatus(attemptID, "cancelled", "cancelled")
+								_ = s.UpdateTaskPhaseAndStatus(t.TaskID, t.Phase, "cancelled")
+								return
+							}
 							meta := map[string]interface{}{
 								"task_id":    t.TaskID,
 								"attempt_id": attemptID,
@@ -117,6 +124,13 @@ func StartLithiumWorker(ctx context.Context, s Store, repoRoot string, exe lithi
 								}
 								out, err := cmd.CombinedOutput()
 								hookOut += string(out)
+								if err != nil && errors.Is(err, context.Canceled) {
+									_ = os.WriteFile(filepath.Join(fullDir, "result.json"), []byte(`{"status":"cancelled","role":"lithium"}`), 0o644)
+									_ = os.WriteFile(filepath.Join(fullDir, "log.txt"), []byte(crashNote+"cancelled\n"+hookOut), 0o644)
+									_, _ = s.UpdateAttemptStatus(attemptID, "cancelled", "cancelled")
+									_ = s.UpdateTaskPhaseAndStatus(t.TaskID, t.Phase, "cancelled")
+									return
+								}
 								hookErr = err
 							}
 						}
