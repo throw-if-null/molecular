@@ -30,6 +30,8 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to open sqlite db: %v", err)
 	}
+	// configure busy timeout to reduce SQLITE_BUSY transient failures
+	_, _ = db.Exec(`PRAGMA busy_timeout = 5000`)
 	defer db.Close()
 
 	s := store.New(db)
