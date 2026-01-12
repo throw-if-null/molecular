@@ -315,58 +315,109 @@ func (s *Store) CreateAttempt(taskID, role string) (int64, string, int64, string
 	return id, artifactsDir, next, startedAt, nil
 }
 func (s *Store) UpdateAttemptStatus(attemptID int64, status, errorSummary string) (int, error) {
-	tx, err := s.db.Begin()
-	if err != nil {
-		return 0, err
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	// read attempt to get task_id and role
-	var taskID string
-	var role string
-	if err := tx.QueryRow(`SELECT task_id, role FROM attempts WHERE id = ?`, attemptID).Scan(&taskID, &role); err != nil {
-		if isNotFound(err) {
-			return 0, ErrNotFound
+	// Some environments experience transient SQLITE_BUSY errors when
+	// concurrent writers contend. Retry the whole UpdateAttemptStatus
+	// transaction a few times with a small backoff to avoid leaving the
+	// attempt stuck in `running` with `current_attempt_id` set.
+	const maxRetries = 5
+	var lastErr error
+	for i := 0; i < maxRetries; i++ {
+		tx, err := s.db.Begin()
+		if err != nil {
+			lastErr = err
+			// if begin failed due to busy, backoff and retry
+			if isSqliteBusy(err) {
+				time.Sleep(time.Duration(10*(1<<i)) * time.Millisecond)
+				continue
+			}
+			return 0, err
 		}
-		return 0, err
-	}
+		func() {
+			defer func() { _ = tx.Rollback() }()
 
-	newCount := 0
-	// if this attempt failed, increment role-specific retry counters
-	if status == "failed" {
-		switch role {
-		case "helium":
-			if _, err := tx.Exec(`UPDATE tasks SET helium_retries = helium_retries + 1, updated_at = ? WHERE task_id = ?`, time.Now().UTC().Format(time.RFC3339Nano), taskID); err != nil {
-				return 0, err
+			// read attempt to get task_id and role
+			var taskID string
+			var role string
+			if err := tx.QueryRow(`SELECT task_id, role FROM attempts WHERE id = ?`, attemptID).Scan(&taskID, &role); err != nil {
+				if isNotFound(err) {
+					lastErr = ErrNotFound
+					return
+				}
+				lastErr = err
+				return
 			}
-			if err := tx.QueryRow(`SELECT helium_retries FROM tasks WHERE task_id = ?`, taskID).Scan(&newCount); err != nil {
-				return 0, err
+
+			newCount := 0
+			// if this attempt failed, increment role-specific retry counters
+			if status == "failed" {
+				switch role {
+				case "helium":
+					if _, err := tx.Exec(`UPDATE tasks SET helium_retries = helium_retries + 1, updated_at = ? WHERE task_id = ?`, time.Now().UTC().Format(time.RFC3339Nano), taskID); err != nil {
+						lastErr = err
+						return
+					}
+					if err := tx.QueryRow(`SELECT helium_retries FROM tasks WHERE task_id = ?`, taskID).Scan(&newCount); err != nil {
+						lastErr = err
+						return
+					}
+				case "carbon":
+					if _, err := tx.Exec(`UPDATE tasks SET carbon_retries = carbon_retries + 1, updated_at = ? WHERE task_id = ?`, time.Now().UTC().Format(time.RFC3339Nano), taskID); err != nil {
+						lastErr = err
+						return
+					}
+					if err := tx.QueryRow(`SELECT carbon_retries FROM tasks WHERE task_id = ?`, taskID).Scan(&newCount); err != nil {
+						lastErr = err
+						return
+					}
+				default:
+					// do not touch review_retries here; other flows handle it
+				}
 			}
-		case "carbon":
-			if _, err := tx.Exec(`UPDATE tasks SET carbon_retries = carbon_retries + 1, updated_at = ? WHERE task_id = ?`, time.Now().UTC().Format(time.RFC3339Nano), taskID); err != nil {
-				return 0, err
+
+			if _, err := tx.Exec(`UPDATE attempts SET status = ?, finished_at = ?, error_summary = ? WHERE id = ?`, status, time.Now().UTC().Format(time.RFC3339Nano), errorSummary, attemptID); err != nil {
+				lastErr = err
+				return
 			}
-			if err := tx.QueryRow(`SELECT carbon_retries FROM tasks WHERE task_id = ?`, taskID).Scan(&newCount); err != nil {
-				return 0, err
+
+			// clear current_attempt_id on tasks if it matches this attempt
+			if _, err := tx.Exec(`UPDATE tasks SET current_attempt_id = NULL WHERE current_attempt_id = ?`, attemptID); err != nil {
+				lastErr = err
+				return
 			}
-		default:
-			// do not touch review_retries here; other flows handle it
+
+			if err := tx.Commit(); err != nil {
+				lastErr = err
+				return
+			}
+			// success
+			lastErr = nil
+		}()
+		if lastErr == nil {
+			return newCount, nil
 		}
+		// if lastErr indicates SQLITE_BUSY/locked, retry with backoff
+		if isSqliteBusy(lastErr) {
+			time.Sleep(time.Duration(10*(1<<i)) * time.Millisecond)
+			continue
+		}
+		// non-retriable error
+		return 0, lastErr
 	}
+	// all retries exhausted
+	if lastErr != nil {
+		// best-effort: try to mark the attempt finished (best-effort) but return the error
+		return 0, lastErr
+	}
+	return 0, nil
+}
 
-	if _, err := tx.Exec(`UPDATE attempts SET status = ?, finished_at = ?, error_summary = ? WHERE id = ?`, status, time.Now().UTC().Format(time.RFC3339Nano), errorSummary, attemptID); err != nil {
-		return 0, err
+// isSqliteBusy reports whether err represents a busy/locked sqlite condition.
+func isSqliteBusy(err error) bool {
+	if err == nil {
+		return false
 	}
-
-	// clear current_attempt_id on tasks if it matches this attempt
-	if _, err := tx.Exec(`UPDATE tasks SET current_attempt_id = NULL WHERE current_attempt_id = ?`, attemptID); err != nil {
-		return 0, err
-	}
-
-	if err := tx.Commit(); err != nil {
-		return 0, err
-	}
-	return newCount, nil
+	msg := err.Error()
+	return msg == "database is locked" || msg == "database is busy" || contains(msg, "SQLITE_BUSY")
 }
 
 func (s *Store) GetAttempt(taskID string, attemptID int64) (*api.Attempt, error) {
