@@ -82,7 +82,7 @@ func TestCleanupRejectsTraversalTaskID(t *testing.T) {
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
-	req, _ := http.NewRequest("POST", ts.URL+"/v1/tasks/../evil/cleanup", nil)
+	req, _ := http.NewRequest("POST", ts.URL+"/v1/tasks/%2E%2E%2Fevil/cleanup", nil)
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("req: %v", err)
