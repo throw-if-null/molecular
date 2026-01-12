@@ -220,8 +220,20 @@ func (s *Store) CancelTask(taskID string) (bool, error) {
 
 // UpdateTaskPhaseAndStatus updates the task's phase and status and sets updated_at.
 func (s *Store) UpdateTaskPhaseAndStatus(taskID, phase, status string) error {
-	_, err := s.db.Exec(`UPDATE tasks SET phase = ?, status = ?, updated_at = ? WHERE task_id = ?`, phase, status, time.Now().UTC().Format(time.RFC3339Nano), taskID)
-	return err
+	// Retry on SQLITE_BUSY to avoid transient contention leaving tasks in running state.
+	const maxRetries = 5
+	for i := 0; i < maxRetries; i++ {
+		_, err := s.db.Exec(`UPDATE tasks SET phase = ?, status = ?, updated_at = ? WHERE task_id = ?`, phase, status, time.Now().UTC().Format(time.RFC3339Nano), taskID)
+		if err == nil {
+			return nil
+		}
+		if isSqliteBusy(err) {
+			time.Sleep(time.Duration(10*(1<<i)) * time.Millisecond)
+			continue
+		}
+		return err
+	}
+	return nil
 }
 
 func isUniqueConstraintError(err error) bool {
