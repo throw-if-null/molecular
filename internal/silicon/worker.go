@@ -33,70 +33,70 @@ func StartLithiumWorker(ctx context.Context, s Store, repoRoot string, exe lithi
 					continue
 				}
 				for _, t := range tasks {
-if t.Phase == "lithium" && t.Status == "running" {
-					// process one task: create an attempt, ensure worktree and write lithium artifacts
-					cfg := lithium.Config{
-						RepoRoot:      repoRoot,
-						TaskID:        t.TaskID,
-						WorktreePath:  t.WorktreePath,
-						ArtifactsRoot: t.ArtifactsRoot,
-					}
-					r := lithium.NewRunner(cfg, exe)
+					if t.Phase == "lithium" && t.Status == "running" {
+						// process one task: create an attempt, ensure worktree and write lithium artifacts
+						cfg := lithium.Config{
+							RepoRoot:      repoRoot,
+							TaskID:        t.TaskID,
+							WorktreePath:  t.WorktreePath,
+							ArtifactsRoot: t.ArtifactsRoot,
+						}
+						r := lithium.NewRunner(cfg, exe)
 
-					// create attempt record (role = 'lithium')
-					attemptID, artifactsDir, _, startedAt, err := s.CreateAttempt(t.TaskID, "lithium")
-					if err != nil {
-						// can't create attempt, mark task failed
-						_ = s.UpdateTaskPhaseAndStatus(t.TaskID, "lithium", "failed")
-						continue
-					}
+						// create attempt record (role = 'lithium')
+						attemptID, artifactsDir, _, startedAt, err := s.CreateAttempt(t.TaskID, "lithium")
+						if err != nil {
+							// can't create attempt, mark task failed
+							_ = s.UpdateTaskPhaseAndStatus(t.TaskID, "lithium", "failed")
+							continue
+						}
 
-					// ensure attempt artifacts directory exists under repoRoot
-					fullDir := filepath.Join(repoRoot, artifactsDir)
-					_ = os.MkdirAll(fullDir, 0o755)
+						// ensure attempt artifacts directory exists under repoRoot
+						fullDir := filepath.Join(repoRoot, artifactsDir)
+						_ = os.MkdirAll(fullDir, 0o755)
 
-					// ensure worktree (still idempotent). Capture any output in attempt log.
-					wtPath, err := r.EnsureWorktree(ctx)
-					if err != nil {
-						// write meta, result and log files to attempt dir and mark attempt failed
+						// ensure worktree (still idempotent). Capture any output in attempt log.
+						wtPath, err := r.EnsureWorktree(ctx)
+						if err != nil {
+							// write meta, result and log files to attempt dir and mark attempt failed
+							meta := map[string]interface{}{
+								"task_id":    t.TaskID,
+								"attempt_id": attemptID,
+								"role":       "lithium",
+								"status":     "failed",
+								"started_at": startedAt,
+							}
+							if mb, jerr := json.Marshal(meta); jerr == nil {
+								_ = os.WriteFile(filepath.Join(fullDir, "meta.json"), mb, 0o644)
+							}
+							_ = os.WriteFile(filepath.Join(fullDir, "result.json"), []byte(`{"status":"failed","role":"lithium"}`), 0o644)
+							_ = os.WriteFile(filepath.Join(fullDir, "log.txt"), []byte(err.Error()+"\n"), 0o644)
+							_ = s.UpdateAttemptStatus(attemptID, "failed", err.Error())
+							_ = s.UpdateTaskPhaseAndStatus(t.TaskID, "lithium", "failed")
+							continue
+						}
+
+						// write meta, result and log indicating success of worktree ensure
 						meta := map[string]interface{}{
-							"task_id":    t.TaskID,
-							"attempt_id": attemptID,
-							"role":       "lithium",
-							"status":     "failed",
-							"started_at": startedAt,
+							"task_id":       t.TaskID,
+							"attempt_id":    attemptID,
+							"role":          "lithium",
+							"status":        "ok",
+							"started_at":    startedAt,
+							"worktree_path": wtPath,
 						}
 						if mb, jerr := json.Marshal(meta); jerr == nil {
 							_ = os.WriteFile(filepath.Join(fullDir, "meta.json"), mb, 0o644)
 						}
-						_ = os.WriteFile(filepath.Join(fullDir, "result.json"), []byte(`{"status":"failed","role":"lithium"}`), 0o644)
-						_ = os.WriteFile(filepath.Join(fullDir, "log.txt"), []byte(err.Error()+"\n"), 0o644)
-						_ = s.UpdateAttemptStatus(attemptID, "failed", err.Error())
-						_ = s.UpdateTaskPhaseAndStatus(t.TaskID, "lithium", "failed")
-						continue
-					}
+						_ = os.WriteFile(filepath.Join(fullDir, "result.json"), []byte(`{"status":"ok","role":"lithium"}`), 0o644)
+						// write a simple log entry
+						_ = os.WriteFile(filepath.Join(fullDir, "log.txt"), []byte("worktree ensured\n"), 0o644)
 
-					// write meta, result and log indicating success of worktree ensure
-					meta := map[string]interface{}{
-						"task_id":      t.TaskID,
-						"attempt_id":   attemptID,
-						"role":         "lithium",
-						"status":       "ok",
-						"started_at":   startedAt,
-						"worktree_path": wtPath,
+						// mark attempt ok
+						_ = s.UpdateAttemptStatus(attemptID, "ok", "")
+						// transition phase to carbon (keep status running)
+						_ = s.UpdateTaskPhaseAndStatus(t.TaskID, "carbon", "running")
 					}
-					if mb, jerr := json.Marshal(meta); jerr == nil {
-						_ = os.WriteFile(filepath.Join(fullDir, "meta.json"), mb, 0o644)
-					}
-					_ = os.WriteFile(filepath.Join(fullDir, "result.json"), []byte(`{"status":"ok","role":"lithium"}`), 0o644)
-					// write a simple log entry
-					_ = os.WriteFile(filepath.Join(fullDir, "log.txt"), []byte("worktree ensured\n"), 0o644)
-
-					// mark attempt ok
-					_ = s.UpdateAttemptStatus(attemptID, "ok", "")
-					// transition phase to carbon (keep status running)
-					_ = s.UpdateTaskPhaseAndStatus(t.TaskID, "carbon", "running")
-				}
 
 				}
 			}
