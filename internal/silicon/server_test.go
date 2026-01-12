@@ -179,56 +179,57 @@ func TestListCancelLogsEndpoints(t *testing.T) {
 	}
 }
 
-
 func TestLogsHardCap(t *testing.T) {
-    s, cleanup := setupTestStore(t)
-    defer cleanup()
+	s, cleanup := setupTestStore(t)
+	defer cleanup()
 
-    _, _, err := s.CreateTaskOrGetExisting(&api.CreateTaskRequest{TaskID: "bigtask", Prompt: "p"})
-    if err != nil {
-        t.Fatalf("create task: %v", err)
-    }
+	_, _, err := s.CreateTaskOrGetExisting(&api.CreateTaskRequest{TaskID: "bigtask", Prompt: "p"})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
 
-    attemptID, artifactsDir, _, _, err := s.CreateAttempt("bigtask", "carbon")
-    if err != nil {
-        t.Fatalf("create attempt: %v", err)
-    }
-    if err := os.MkdirAll(artifactsDir, 0o755); err != nil {
-        t.Fatalf("mkdir artifacts: %v", err)
-    }
-    logPath := filepath.Join(artifactsDir, "log.txt")
-    // write a file larger than the cap (5 MiB)
-    size := (5 << 20) + 1
-    data := make([]byte, size)
-    for i := range data { data[i] = 'a' }
-    if err := os.WriteFile(logPath, data, 0o644); err != nil {
-        t.Fatalf("write big log: %v", err)
-    }
+	attemptID, artifactsDir, _, _, err := s.CreateAttempt("bigtask", "carbon")
+	if err != nil {
+		t.Fatalf("create attempt: %v", err)
+	}
+	if err := os.MkdirAll(artifactsDir, 0o755); err != nil {
+		t.Fatalf("mkdir artifacts: %v", err)
+	}
+	logPath := filepath.Join(artifactsDir, "log.txt")
+	// write a file larger than the cap (5 MiB)
+	size := (5 << 20) + 1
+	data := make([]byte, size)
+	for i := range data {
+		data[i] = 'a'
+	}
+	if err := os.WriteFile(logPath, data, 0o644); err != nil {
+		t.Fatalf("write big log: %v", err)
+	}
 
-    srv := silicon.NewServer(s, 3, 3, 2)
-    ts := httptest.NewServer(srv.Handler())
-    defer ts.Close()
+	srv := silicon.NewServer(s, 3, 3, 2)
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
 
-    res, err := http.Get(ts.URL + "/v1/tasks/bigtask/logs")
-    if err != nil {
-        t.Fatalf("get big logs: %v", err)
-    }
-    defer res.Body.Close()
-    if res.StatusCode != http.StatusRequestEntityTooLarge {
-        b, _ := io.ReadAll(res.Body)
-        t.Fatalf("expected 413 for big log, got %s; body=%s", res.Status, string(b))
-    }
+	res, err := http.Get(ts.URL + "/v1/tasks/bigtask/logs")
+	if err != nil {
+		t.Fatalf("get big logs: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusRequestEntityTooLarge {
+		b, _ := io.ReadAll(res.Body)
+		t.Fatalf("expected 413 for big log, got %s; body=%s", res.Status, string(b))
+	}
 
-    // also ensure that asking for tail is rejected as well (simple hard cap behavior)
-    tres, err := http.Get(ts.URL + "/v1/tasks/bigtask/logs?tail=10")
-    if err != nil {
-        t.Fatalf("get big logs tail: %v", err)
-    }
-    defer tres.Body.Close()
-    if tres.StatusCode != http.StatusRequestEntityTooLarge {
-        b, _ := io.ReadAll(tres.Body)
-        t.Fatalf("expected 413 for big log with tail, got %s; body=%s", tres.Status, string(b))
-    }
+	// also ensure that asking for tail is rejected as well (simple hard cap behavior)
+	tres, err := http.Get(ts.URL + "/v1/tasks/bigtask/logs?tail=10")
+	if err != nil {
+		t.Fatalf("get big logs tail: %v", err)
+	}
+	defer tres.Body.Close()
+	if tres.StatusCode != http.StatusRequestEntityTooLarge {
+		b, _ := io.ReadAll(tres.Body)
+		t.Fatalf("expected 413 for big log with tail, got %s; body=%s", tres.Status, string(b))
+	}
 
-    _ = attemptID
+	_ = attemptID
 }

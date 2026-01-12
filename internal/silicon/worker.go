@@ -38,42 +38,59 @@ func StartLithiumWorker(ctx context.Context, s Store, repoRoot string, exe lithi
 					continue
 				}
 				for _, t := range tasks {
-					if t.Phase == "lithium" && t.Status == "running" {
-						// check previous attempt for crash recovery note
-						crashNote := ""
-						if prev, perr := s.GetLatestAttemptByRole(t.TaskID, "lithium"); perr == nil {
-							if strings.Contains(prev.ErrorSummary, "crash recovery") {
-								crashNote = "previous run crashed; continue from artifacts\n"
-							}
+					if t.Phase != "lithium" || t.Status != "running" {
+						continue
+					}
+					crashNote := ""
+					if prev, perr := s.GetLatestAttemptByRole(t.TaskID, "lithium"); perr == nil {
+						if strings.Contains(prev.ErrorSummary, "crash recovery") {
+							crashNote = "previous run crashed; continue from artifacts\n"
 						}
+					}
+					cfg := lithium.Config{
+						RepoRoot:      repoRoot,
+						TaskID:        t.TaskID,
+						WorktreePath:  t.WorktreePath,
+						ArtifactsRoot: t.ArtifactsRoot,
+					}
+					r := lithium.NewRunner(cfg, exe)
 
-						// process one task: create an attempt, ensure worktree and write lithium artifacts
-						cfg := lithium.Config{
-							RepoRoot:      repoRoot,
-							TaskID:        t.TaskID,
-							WorktreePath:  t.WorktreePath,
-							ArtifactsRoot: t.ArtifactsRoot,
+					attemptID, artifactsDir, _, startedAt, err := s.CreateAttempt(t.TaskID, "lithium")
+					if err != nil {
+						if !errors.Is(err, store.ErrInProgress) {
+							updateTaskPhaseWithRetries(s, t.TaskID, "lithium", "failed")
 						}
-						r := lithium.NewRunner(cfg, exe)
+						continue
+					}
 
-						// create attempt record (role = 'lithium')
-						attemptID, artifactsDir, _, startedAt, err := s.CreateAttempt(t.TaskID, "lithium")
-						if err != nil {
-							// if someone else claimed the task, skip; otherwise mark failed
-							if !errors.Is(err, store.ErrInProgress) {
-								updateTaskPhaseWithRetries(s, t.TaskID, "lithium", "failed")
-							}
-							continue
-						}
+					if cancelled, cerr := s.IsTaskCancelled(t.TaskID); cerr == nil && cancelled {
+						fullDir := filepath.Join(repoRoot, artifactsDir)
+						_ = os.MkdirAll(fullDir, 0o755)
+						_ = os.WriteFile(filepath.Join(fullDir, "result.json"), []byte(`{"status":"cancelled","role":"lithium"}`), 0o644)
+						_, _ = s.UpdateAttemptStatus(attemptID, "cancelled", "cancelled")
+						_ = s.UpdateTaskPhaseAndStatus(t.TaskID, t.Phase, "cancelled")
+						continue
+					}
 
-						// ensure attempt artifacts directory exists under repoRoot
+					// run attempt scoped
+					func() {
+						attemptCtx, attemptCancel := context.WithCancel(ctx)
+						RegisterAttemptCanceler(t.TaskID, attemptCancel)
+						defer UnregisterAttemptCanceler(t.TaskID)
+						defer attemptCancel()
+
 						fullDir := filepath.Join(repoRoot, artifactsDir)
 						_ = os.MkdirAll(fullDir, 0o755)
 
-						// ensure worktree (still idempotent). Capture any output in attempt log.
-						wtPath, err := r.EnsureWorktree(ctx)
+						wtPath, err := r.EnsureWorktree(attemptCtx)
 						if err != nil {
-							// write meta, result and log files to attempt dir and mark attempt failed
+							if errors.Is(err, context.Canceled) {
+								_ = os.WriteFile(filepath.Join(fullDir, "result.json"), []byte(`{"status":"cancelled","role":"lithium"}`), 0o644)
+								_ = os.WriteFile(filepath.Join(fullDir, "log.txt"), []byte(crashNote+"cancelled\n"), 0o644)
+								_, _ = s.UpdateAttemptStatus(attemptID, "cancelled", "cancelled")
+								_ = s.UpdateTaskPhaseAndStatus(t.TaskID, t.Phase, "cancelled")
+								return
+							}
 							meta := map[string]interface{}{
 								"task_id":    t.TaskID,
 								"attempt_id": attemptID,
@@ -88,33 +105,36 @@ func StartLithiumWorker(ctx context.Context, s Store, repoRoot string, exe lithi
 							_ = os.WriteFile(filepath.Join(fullDir, "log.txt"), []byte(crashNote+err.Error()+"\n"), 0o644)
 							_, _ = s.UpdateAttemptStatus(attemptID, "failed", err.Error())
 							updateTaskPhaseWithRetries(s, t.TaskID, "lithium", "failed")
-							continue
+							return
 						}
 
-						// run optional lithium hook under .molecular/lithium.sh
 						hookOut := ""
 						hookErr := error(nil)
 						hookPath := filepath.Join(repoRoot, ".molecular", "lithium.sh")
-						// only run on unix-like systems when executable
 						if fi, err := os.Stat(hookPath); err == nil {
-							// diagnostic: record mode
 							hookOut = "hook found\nmode=" + fi.Mode().String() + "\n"
 							if runtime.GOOS == "windows" {
 								hookOut += "skipped lithium.sh on windows\n"
 							} else if fi.Mode()&0111 == 0 {
 								hookOut += "lithium.sh exists but not executable, skipping\n"
 							} else {
-								cmd := exec.CommandContext(ctx, "/bin/sh", "-x", hookPath)
+								cmd := exec.CommandContext(attemptCtx, "/bin/sh", "-x", hookPath)
 								if wtPath != "" {
 									cmd.Dir = wtPath
 								}
 								out, err := cmd.CombinedOutput()
 								hookOut += string(out)
+								if err != nil && errors.Is(err, context.Canceled) {
+									_ = os.WriteFile(filepath.Join(fullDir, "result.json"), []byte(`{"status":"cancelled","role":"lithium"}`), 0o644)
+									_ = os.WriteFile(filepath.Join(fullDir, "log.txt"), []byte(crashNote+"cancelled\n"+hookOut), 0o644)
+									_, _ = s.UpdateAttemptStatus(attemptID, "cancelled", "cancelled")
+									_ = s.UpdateTaskPhaseAndStatus(t.TaskID, t.Phase, "cancelled")
+									return
+								}
 								hookErr = err
 							}
 						}
 
-						// write meta, result and log indicating success or hook failure
 						meta := map[string]interface{}{
 							"task_id":       t.TaskID,
 							"attempt_id":    attemptID,
@@ -127,23 +147,17 @@ func StartLithiumWorker(ctx context.Context, s Store, repoRoot string, exe lithi
 							_ = os.WriteFile(filepath.Join(fullDir, "meta.json"), mb, 0o644)
 						}
 						_ = os.WriteFile(filepath.Join(fullDir, "result.json"), []byte(`{"status":"ok","role":"lithium"}`), 0o644)
-						// write a log entry including worktree ensured and any hook output
-						logContent := "worktree ensured\n" + hookOut
-						_ = os.WriteFile(filepath.Join(fullDir, "log.txt"), []byte(logContent), 0o644)
+						_ = os.WriteFile(filepath.Join(fullDir, "log.txt"), []byte("worktree ensured\n"+hookOut), 0o644)
 
 						if hookErr != nil {
-							// hook failed -> mark attempt and task failed
 							_, _ = s.UpdateAttemptStatus(attemptID, "failed", hookErr.Error())
 							updateTaskPhaseWithRetries(s, t.TaskID, "lithium", "failed")
-							continue
+							return
 						}
 
-						// mark attempt ok
 						_, _ = s.UpdateAttemptStatus(attemptID, "ok", "")
-						// transition phase to carbon (keep status running)
 						_ = s.UpdateTaskPhaseAndStatus(t.TaskID, "carbon", "running")
-					}
-
+					}()
 				}
 			}
 		}
@@ -203,6 +217,16 @@ func StartCarbonWorker(ctx context.Context, s Store, repoRoot string, interval t
 						// create attempt
 						attemptID, artifactsDir, attemptNum, startedAt, err := s.CreateAttempt(t.TaskID, "carbon")
 						if err != nil {
+							continue
+						}
+						// if task was cancelled between polling and attempt creation,
+						// mark the attempt cancelled and skip doing work.
+						if cancelled, cerr := s.IsTaskCancelled(t.TaskID); cerr == nil && cancelled {
+							fullDir := filepath.Join(repoRoot, artifactsDir)
+							_ = os.MkdirAll(fullDir, 0o755)
+							_ = os.WriteFile(filepath.Join(fullDir, "result.json"), []byte(`{"status":"cancelled","role":"carbon"}`), 0o644)
+							_ = os.WriteFile(filepath.Join(fullDir, "log.txt"), []byte(crashNote+"cancelled\n"), 0o644)
+							_, _ = s.UpdateAttemptStatus(attemptID, "cancelled", "cancelled")
 							continue
 						}
 						// ensure dir exists under repoRoot
@@ -283,6 +307,14 @@ func StartHeliumWorker(ctx context.Context, s Store, repoRoot string, interval t
 						// create attempt
 						attemptID, artifactsDir, attemptNum, startedAt, err := s.CreateAttempt(t.TaskID, "helium")
 						if err != nil {
+							continue
+						}
+						if cancelled, cerr := s.IsTaskCancelled(t.TaskID); cerr == nil && cancelled {
+							fullDir := filepath.Join(repoRoot, artifactsDir)
+							_ = os.MkdirAll(fullDir, 0o755)
+							_ = os.WriteFile(filepath.Join(fullDir, "result.json"), []byte(`{"status":"cancelled","role":"helium"}`), 0o644)
+							_ = os.WriteFile(filepath.Join(fullDir, "log.txt"), []byte("cancelled\n"), 0o644)
+							_, _ = s.UpdateAttemptStatus(attemptID, "cancelled", "cancelled")
 							continue
 						}
 						// ensure dir exists under repoRoot
@@ -386,6 +418,14 @@ func StartChlorineWorker(ctx context.Context, s Store, repoRoot string, interval
 						// create attempt
 						attemptID, artifactsDir, attemptNum, startedAt, err := s.CreateAttempt(t.TaskID, "chlorine")
 						if err != nil {
+							continue
+						}
+						if cancelled, cerr := s.IsTaskCancelled(t.TaskID); cerr == nil && cancelled {
+							fullDir := filepath.Join(repoRoot, artifactsDir)
+							_ = os.MkdirAll(fullDir, 0o755)
+							_ = os.WriteFile(filepath.Join(fullDir, "result.json"), []byte(`{"status":"cancelled","role":"chlorine"}`), 0o644)
+							_ = os.WriteFile(filepath.Join(fullDir, "log.txt"), []byte("cancelled\n"), 0o644)
+							_, _ = s.UpdateAttemptStatus(attemptID, "cancelled", "cancelled")
 							continue
 						}
 						fullDir := filepath.Join(repoRoot, artifactsDir)

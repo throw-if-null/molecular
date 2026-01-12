@@ -190,6 +190,20 @@ func (s *Store) ListTasks(limit int) ([]*api.Task, error) {
 	return out, nil
 }
 
+// IsTaskCancelled reports whether a task is currently cancelled.
+// Returns ErrNotFound if the task can't be found.
+func (s *Store) IsTaskCancelled(taskID string) (bool, error) {
+	row := s.db.QueryRow(`SELECT status FROM tasks WHERE task_id = ?`, taskID)
+	var status string
+	if err := row.Scan(&status); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, ErrNotFound
+		}
+		return false, err
+	}
+	return status == "cancelled", nil
+}
+
 // CancelTask sets status to 'cancelled' if task exists and not already terminal.
 // Returns true if the status was changed.
 func (s *Store) CancelTask(taskID string) (bool, error) {
