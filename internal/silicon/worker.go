@@ -91,7 +91,7 @@ func StartLithiumWorker(ctx context.Context, s Store, repoRoot string, exe lithi
 							} else if fi.Mode()&0111 == 0 {
 								hookOut += "lithium.sh exists but not executable, skipping\n"
 							} else {
-								cmd := exec.CommandContext(ctx, "sh", "-x", hookPath)
+								cmd := exec.CommandContext(ctx, "/bin/sh", "-x", hookPath)
 								if wtPath != "" {
 									cmd.Dir = wtPath
 								}
@@ -363,7 +363,7 @@ func StartChlorineWorker(ctx context.Context, s Store, repoRoot string, interval
 							} else if fi.Mode()&0111 == 0 {
 								hookOut = "chlorine.sh exists but not executable, skipping\n"
 							} else {
-								cmd := exec.CommandContext(ctx, "sh", "-x", hookPath)
+								cmd := exec.CommandContext(ctx, "/bin/sh", "-x", hookPath)
 								cmd.Dir = fullDir
 								out, err := cmd.CombinedOutput()
 								hookOut = string(out)
