@@ -55,15 +55,7 @@ func (r *Runner) EnsureWorktree(ctx context.Context) (string, error) {
 	// build args: worktree add -b <branch> <path> <base>
 	args := []string{"worktree", "add", "-b", branch, wt, base}
 
-	// ensure artifacts dir exists
-	logDir := filepath.Join(r.cfg.ArtifactsRoot, "lithium", time.Now().UTC().Format("20060102T150405Z"))
-	if err := os.MkdirAll(logDir, 0o755); err != nil {
-		return "", err
-	}
-	// run git
 	out, err := r.exe.Run(ctx, r.cfg.RepoRoot, "git", args...)
-	// write output to log
-	_ = os.WriteFile(filepath.Join(logDir, "log.txt"), []byte(out+"\n"+errString(err)), 0o644)
 	if err != nil {
 		return "", fmt.Errorf("git worktree add failed: %w", err)
 	}
