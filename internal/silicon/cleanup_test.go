@@ -10,7 +10,6 @@ import (
 
 	"github.com/throw-if-null/molecular/internal/api"
 	"github.com/throw-if-null/molecular/internal/silicon"
-	"github.com/throw-if-null/molecular/internal/store"
 )
 
 func TestCleanupEndpointDeletesPathsAndIsIdempotent(t *testing.T) {
