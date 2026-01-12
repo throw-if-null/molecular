@@ -5,8 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
 
 	"github.com/throw-if-null/molecular/internal/api"
+	"github.com/throw-if-null/molecular/internal/store"
 )
 
 type Server struct {
@@ -19,9 +24,16 @@ type Store interface {
 	ListTasks(limit int) ([]*api.Task, error)
 	CancelTask(taskID string) (bool, error)
 	UpdateTaskPhaseAndStatus(taskID, phase, status string) error
+
 	// Attempt management for workers
 	CreateAttempt(taskID, role string) (int64, string, int64, string, error)
 	UpdateAttemptStatus(attemptID int64, status, errorSummary string) error
+
+	// Attempt queries for logs endpoint
+	GetAttempt(taskID string, attemptID int64) (*store.Attempt, error)
+	GetLatestAttempt(taskID string) (*store.Attempt, error)
+	GetLatestAttemptByRole(taskID string, role string) (*store.Attempt, error)
+
 	// Retry counters
 	IncrementCarbonRetries(taskID string) (int, error)
 	IncrementHeliumRetries(taskID string) (int, error)
@@ -80,7 +92,7 @@ func (s *Server) handleGetTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	task, err := s.store.GetTask(taskID)
-	if errors.Is(err, ErrNotFound) {
+	if isNotFound(err) {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
@@ -118,7 +130,7 @@ func (s *Server) handleCancelTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	changed, err := s.store.CancelTask(taskID)
-	if errors.Is(err, ErrNotFound) {
+	if isNotFound(err) {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
@@ -141,20 +153,103 @@ func (s *Server) handleGetTaskLogs(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing task_id", http.StatusBadRequest)
 		return
 	}
-	task, err := s.store.GetTask(taskID)
-	if errors.Is(err, ErrNotFound) {
+
+	// validate task exists
+	if _, err := s.store.GetTask(taskID); isNotFound(err) {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
-	}
-	if err != nil {
+	} else if err != nil {
 		http.Error(w, "failed to read task", http.StatusInternalServerError)
 		return
 	}
 
-	resp := map[string]interface{}{
-		"artifacts_root": task.ArtifactsRoot,
-		"paths":          []string{task.ArtifactsRoot + "/log.txt", task.ArtifactsRoot + "/attempt-1/log.txt"},
+	q := r.URL.Query()
+	role := q.Get("role")
+	attemptIDStr := q.Get("attempt_id")
+	tailStr := q.Get("tail")
+
+	var attempt *store.Attempt
+	var err error
+
+	if attemptIDStr != "" {
+		id, perr := strconv.ParseInt(attemptIDStr, 10, 64)
+		if perr != nil || id <= 0 {
+			http.Error(w, "invalid attempt_id", http.StatusBadRequest)
+			return
+		}
+		attempt, err = s.store.GetAttempt(taskID, id)
+	} else if role != "" {
+		if !isValidRole(role) {
+			http.Error(w, "invalid role", http.StatusBadRequest)
+			return
+		}
+		attempt, err = s.store.GetLatestAttemptByRole(taskID, role)
+	} else {
+		attempt, err = s.store.GetLatestAttempt(taskID)
 	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(resp)
+
+	if isNotFound(err) {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		http.Error(w, "failed to read attempts", http.StatusInternalServerError)
+		return
+	}
+
+	logPath := filepath.Join(attempt.ArtifactsDir, "log.txt")
+	b, err := os.ReadFile(logPath)
+	if errors.Is(err, os.ErrNotExist) {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		http.Error(w, "failed to read log", http.StatusInternalServerError)
+		return
+	}
+
+	logText := string(b)
+	if tailStr != "" {
+		n, perr := strconv.Atoi(tailStr)
+		if perr != nil || n < 0 {
+			http.Error(w, "invalid tail", http.StatusBadRequest)
+			return
+		}
+		logText = tailLines(logText, n)
+	}
+
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("X-Molecular-Attempt-Id", strconv.FormatInt(attempt.ID, 10))
+	w.Header().Set("X-Molecular-Role", attempt.Role)
+	_, _ = w.Write([]byte(logText))
+}
+
+func isValidRole(role string) bool {
+	switch role {
+	case "lithium", "carbon", "helium", "chlorine":
+		return true
+	default:
+		return false
+	}
+}
+
+func isNotFound(err error) bool {
+	return errors.Is(err, ErrNotFound) || errors.Is(err, store.ErrNotFound) || errors.Is(err, os.ErrNotExist)
+}
+
+func tailLines(s string, n int) string {
+	if n == 0 {
+		return ""
+	}
+	// Normalize to \n lines; treat Windows newlines too.
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	lines := strings.Split(s, "\n")
+	// If file ends with newline, Split will include a trailing empty.
+	if len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	if n >= len(lines) {
+		return strings.Join(lines, "\n")
+	}
+	return strings.Join(lines[len(lines)-n:], "\n")
 }

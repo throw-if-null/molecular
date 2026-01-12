@@ -8,11 +8,24 @@ import (
 	"time"
 
 	"github.com/throw-if-null/molecular/internal/api"
-	"github.com/throw-if-null/molecular/internal/silicon"
 )
 
 type Store struct {
 	db *sql.DB
+}
+
+var ErrNotFound = errors.New("not found")
+
+type Attempt struct {
+	ID           int64
+	TaskID       string
+	Role         string
+	AttemptNum   int64
+	Status       string
+	StartedAt    string
+	FinishedAt   string
+	ArtifactsDir string
+	ErrorSummary string
 }
 
 func New(db *sql.DB) *Store {
@@ -124,7 +137,7 @@ func (s *Store) GetTask(taskID string) (*api.Task, error) {
 	var currentAttempt sql.NullInt64
 	if err := row.Scan(&task.TaskID, &task.Prompt, &task.Status, &task.Phase, &task.CreatedAt, &task.UpdatedAt, &task.CarbonBudget, &task.HeliumBudget, &task.ReviewBudget, &task.ArtifactsRoot, &task.WorktreePath, &currentAttempt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, silicon.ErrNotFound
+			return nil, ErrNotFound
 		}
 		return nil, err
 	}
@@ -180,7 +193,7 @@ func (s *Store) CancelTask(taskID string) (bool, error) {
 	var status string
 	if err := row.Scan(&status); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return false, silicon.ErrNotFound
+			return false, ErrNotFound
 		}
 		return false, err
 	}
@@ -295,6 +308,58 @@ func (s *Store) UpdateAttemptStatus(attemptID int64, status, errorSummary string
 	}
 
 	return tx.Commit()
+}
+
+func (s *Store) GetAttempt(taskID string, attemptID int64) (*Attempt, error) {
+	row := s.db.QueryRow(`
+SELECT id, task_id, role, attempt_num, status, started_at, COALESCE(finished_at, ''), artifacts_dir, COALESCE(error_summary, '')
+FROM attempts
+WHERE task_id = ? AND id = ?
+`, taskID, attemptID)
+	var a Attempt
+	if err := row.Scan(&a.ID, &a.TaskID, &a.Role, &a.AttemptNum, &a.Status, &a.StartedAt, &a.FinishedAt, &a.ArtifactsDir, &a.ErrorSummary); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return &a, nil
+}
+
+func (s *Store) GetLatestAttempt(taskID string) (*Attempt, error) {
+	row := s.db.QueryRow(`
+SELECT id, task_id, role, attempt_num, status, started_at, COALESCE(finished_at, ''), artifacts_dir, COALESCE(error_summary, '')
+FROM attempts
+WHERE task_id = ?
+ORDER BY id DESC
+LIMIT 1
+`, taskID)
+	var a Attempt
+	if err := row.Scan(&a.ID, &a.TaskID, &a.Role, &a.AttemptNum, &a.Status, &a.StartedAt, &a.FinishedAt, &a.ArtifactsDir, &a.ErrorSummary); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return &a, nil
+}
+
+func (s *Store) GetLatestAttemptByRole(taskID string, role string) (*Attempt, error) {
+	row := s.db.QueryRow(`
+SELECT id, task_id, role, attempt_num, status, started_at, COALESCE(finished_at, ''), artifacts_dir, COALESCE(error_summary, '')
+FROM attempts
+WHERE task_id = ? AND role = ?
+ORDER BY id DESC
+LIMIT 1
+`, taskID, role)
+	var a Attempt
+	if err := row.Scan(&a.ID, &a.TaskID, &a.Role, &a.AttemptNum, &a.Status, &a.StartedAt, &a.FinishedAt, &a.ArtifactsDir, &a.ErrorSummary); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return &a, nil
 }
 
 // IncrementCarbonRetries atomically increments carbon_retries and returns the new value.
