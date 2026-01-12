@@ -64,6 +64,17 @@ func setupServer() *httptest.Server {
 		w.WriteHeader(405)
 	})
 
+	// status endpoint for task-1
+	mux.HandleFunc("/v1/tasks/task-1", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" {
+			w.Header().Set("Content-Type", "application/json")
+			body := `{"task_id":"task-1","phase":"carbon","status":"running","carbon_budget":3,"helium_budget":3,"review_budget":2,"latest_attempt":{"id":42,"task_id":"task-1","role":"carbon","attempt_num":1,"status":"running","started_at":"","finished_at":"","artifacts_dir":"/tmp/x","error_summary":""}}`
+			w.Write([]byte(body))
+			return
+		}
+		w.WriteHeader(405)
+	})
+
 	return httptest.NewServer(mux)
 }
 
@@ -264,4 +275,39 @@ func TestDoctorCommand(t *testing.T) {
 		t.Fatalf("expected parse error message in doctor output, got: %s", out.String())
 	}
 
+}
+
+func TestStatusOutput(t *testing.T) {
+	ts := setupServer()
+	defer ts.Close()
+
+	client := &http.Client{}
+	// human output
+	buf := &bytes.Buffer{}
+	oldOut, wout := captureStdout(buf)
+	code := run([]string{"status", "task-1"}, client, ts.URL, buf, bytes.NewBuffer(nil))
+	restoreStdout(oldOut, wout)
+	if code != 0 {
+		t.Fatalf("status exit code: %d", code)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "task-1") || !strings.Contains(out, "latest attempt") {
+		t.Fatalf("unexpected status output: %s", out)
+	}
+
+	// json mode
+	buf.Reset()
+	oldOut, wout = captureStdout(buf)
+	code = run([]string{"status", "--json", "task-1"}, client, ts.URL, buf, bytes.NewBuffer(nil))
+	restoreStdout(oldOut, wout)
+	if code != 0 {
+		t.Fatalf("status --json exit code: %d", code)
+	}
+	var j map[string]interface{}
+	if err := json.Unmarshal(buf.Bytes(), &j); err != nil {
+		t.Fatalf("invalid json output: %v; out=%s", err, buf.String())
+	}
+	if j["task_id"] != "task-1" {
+		t.Fatalf("unexpected json task_id: %v", j["task_id"])
+	}
 }

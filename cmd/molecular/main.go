@@ -124,11 +124,16 @@ func submitWithClient(args []string, client *http.Client, baseURL string, out io
 
 // statusWithClient implements status using provided http client/baseURL.
 func statusWithClient(args []string, client *http.Client, baseURL string, out io.Writer, errOut io.Writer) int {
-	if len(args) != 1 {
+	fs := flag.NewFlagSet("status", flag.ContinueOnError)
+	fs.SetOutput(errOut)
+	var jsonMode bool
+	fs.BoolVar(&jsonMode, "json", false, "output compact JSON for scripting")
+	_ = fs.Parse(args)
+	if fs.NArg() != 1 {
 		usage(errOut)
 		return 2
 	}
-	taskID := args[0]
+	taskID := fs.Arg(0)
 
 	resp, err := client.Get(baseURL + "/v1/tasks/" + taskID)
 	if err != nil {
@@ -147,7 +152,24 @@ func statusWithClient(args []string, client *http.Client, baseURL string, out io
 		return 1
 	}
 
-	fmt.Fprintln(out, string(body))
+	if jsonMode {
+		fmt.Fprintln(out, string(body))
+		return 0
+	}
+
+	// pretty print concise human-friendly status
+	var t api.Task
+	if err := json.Unmarshal(body, &t); err != nil {
+		fmt.Fprintln(errOut, err.Error())
+		return 1
+	}
+	// one-line summary
+	fmt.Fprintf(out, "%s  phase=%s  status=%s\n", t.TaskID, t.Phase, t.Status)
+	if t.LatestAttempt != nil {
+		fmt.Fprintf(out, "latest attempt: id=%d role=%s status=%s\n", t.LatestAttempt.ID, t.LatestAttempt.Role, t.LatestAttempt.Status)
+	}
+	// print retry budgets/counters
+	fmt.Fprintf(out, "budgets: carbon=%d helium=%d review=%d\n", t.CarbonBudget, t.HeliumBudget, t.ReviewBudget)
 	return 0
 }
 

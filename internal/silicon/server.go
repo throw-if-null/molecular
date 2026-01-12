@@ -124,6 +124,10 @@ func (s *Server) handleGetTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// attempt to populate latest attempt summary for convenience in CLI
+	if a, aerr := s.store.GetLatestAttempt(taskID); aerr == nil {
+		task.LatestAttempt = a
+	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(task)
 }
