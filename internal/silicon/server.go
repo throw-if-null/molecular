@@ -31,7 +31,7 @@ type Store interface {
 
 	// Attempt management for workers
 	CreateAttempt(taskID, role string) (int64, string, int64, string, error)
-	UpdateAttemptStatus(attemptID int64, status, errorSummary string) error
+	UpdateAttemptStatus(attemptID int64, status, errorSummary string) (int, error)
 
 	// Attempt queries for logs endpoint
 	GetAttempt(taskID string, attemptID int64) (*api.Attempt, error)
