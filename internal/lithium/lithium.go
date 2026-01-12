@@ -3,6 +3,7 @@ package lithium
 import (
 	"context"
 	"fmt"
+	"github.com/throw-if-null/molecular/internal/paths"
 	"os"
 	"path/filepath"
 )
@@ -29,10 +30,13 @@ func NewRunner(cfg Config, exe ExecRunner) *Runner {
 // EnsureWorktree makes sure the worktree exists using `git worktree add -b <branch> <path> <base>`.
 // It's idempotent: if path exists, do nothing.
 func (r *Runner) EnsureWorktree(ctx context.Context) (string, error) {
-	// worktree root under repo
-	wt := r.cfg.WorktreePath
-	if wt == "" {
-		return "", fmt.Errorf("empty worktree path")
+	// derive and validate worktree path from task id to avoid traversal
+	if err := paths.ValidateTaskID(r.cfg.TaskID); err != nil {
+		return "", fmt.Errorf("invalid task id: %w", err)
+	}
+	wt, werr := paths.WorktreeDir(r.cfg.TaskID)
+	if werr != nil {
+		return "", werr
 	}
 	// if exists, return
 	if fi, err := os.Stat(wt); err == nil && fi.IsDir() {
