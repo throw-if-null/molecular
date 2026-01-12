@@ -16,6 +16,9 @@ var (
 
 const maxTaskIDLen = 64
 
+// MaxTaskIDLen returns the maximum allowed task id length.
+func MaxTaskIDLen() int { return maxTaskIDLen }
+
 var taskIDRe = regexp.MustCompile(`^[A-Za-z0-9._-]{1,` + strconv.Itoa(maxTaskIDLen) + `}$`)
 
 // ValidateTaskID returns nil for allowed task ids, or ErrInvalidTaskID.
