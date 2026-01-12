@@ -54,7 +54,7 @@ func TestListCancelLogsEndpoints(t *testing.T) {
 		}
 	}
 
-	srv := silicon.NewServer(s)
+	srv := silicon.NewServer(s, 3, 3, 2)
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
