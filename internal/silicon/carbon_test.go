@@ -37,7 +37,8 @@ func setupTestStoreWithDB(t *testing.T) (*store.Store, *sql.DB, string, func()) 
 	}
 	return s, db, td, func() {
 		db.Close()
-		os.RemoveAll(td)
+		// keep tmpdir around for debug on failures
+		// os.RemoveAll(td)
 	}
 }
 
