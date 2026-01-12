@@ -190,13 +190,11 @@ func StartCarbonWorker(ctx context.Context, s Store, repoRoot string, interval t
 						_ = os.WriteFile(filepath.Join(fullDir, "log.txt"), []byte("carbon stub run\n"), 0o644)
 						// simulate transient failure deterministically based on prompt
 						if strings.Contains(t.Prompt, "carbon-fail") {
-							newCount, err := s.IncrementCarbonRetries(t.TaskID)
+							newCount, err := s.UpdateAttemptStatus(attemptID, "failed", "transient failure")
 							if err != nil {
-								_, _ = s.UpdateAttemptStatus(attemptID, "failed", "increment retry failed")
 								_ = s.UpdateTaskPhaseAndStatus(t.TaskID, "carbon", "failed")
 								continue
 							}
-							_, _ = s.UpdateAttemptStatus(attemptID, "failed", "transient failure")
 							if newCount >= t.CarbonBudget {
 								_ = s.UpdateTaskPhaseAndStatus(t.TaskID, "carbon", "failed")
 							} else {
@@ -263,15 +261,13 @@ func StartHeliumWorker(ctx context.Context, s Store, repoRoot string, interval t
 						}
 						// simulate transient failure or request changes deterministically based on prompt
 						if strings.Contains(t.Prompt, "helium-fail") {
-							newCount, err := s.IncrementHeliumRetries(t.TaskID)
+							newCount, err := s.UpdateAttemptStatus(attemptID, "failed", "transient failure")
 							if err != nil {
-								_, _ = s.UpdateAttemptStatus(attemptID, "failed", "increment retry failed")
 								_ = s.UpdateTaskPhaseAndStatus(t.TaskID, "helium", "failed")
 								continue
 							}
 							_ = os.WriteFile(filepath.Join(fullDir, "result.json"), []byte(`{"status":"failed","role":"helium"}`), 0o644)
 							_ = os.WriteFile(filepath.Join(fullDir, "log.txt"), []byte("helium transient failure\n"), 0o644)
-							_, _ = s.UpdateAttemptStatus(attemptID, "failed", "transient failure")
 							if newCount >= t.HeliumBudget {
 								_ = s.UpdateTaskPhaseAndStatus(t.TaskID, "helium", "failed")
 							} else {
