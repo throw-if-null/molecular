@@ -166,3 +166,9 @@ func (r *storeRealExecRunner) Run(ctx context.Context, dir string, name string, 
 	}
 	return rr.Run(ctx, dir, name, args...)
 }
+
+// runCmd is a tiny helper used in tests to run git commands
+func runCmd(dir string, name string, args ...string) error {
+	_, err := (&lithium.RealExecRunner{}).Run(context.Background(), dir, name, args...)
+	return err
+}
