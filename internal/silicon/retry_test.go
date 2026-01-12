@@ -2,7 +2,6 @@ package silicon_test
 
 import (
 	"context"
-	"database/sql"
 	"os"
 	"path/filepath"
 	"testing"
@@ -10,7 +9,6 @@ import (
 
 	"github.com/throw-if-null/molecular/internal/api"
 	"github.com/throw-if-null/molecular/internal/silicon"
-	"github.com/throw-if-null/molecular/internal/store"
 	_ "modernc.org/sqlite"
 )
 
