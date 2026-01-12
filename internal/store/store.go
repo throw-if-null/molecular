@@ -258,32 +258,18 @@ func (s *Store) CreateAttempt(taskID, role string) (int64, string, int64, string
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	// atomically claim the task by writing a sentinel (-1) into current_attempt_id
-	res, err := tx.Exec(`UPDATE tasks SET current_attempt_id = -1 WHERE task_id = ? AND current_attempt_id IS NULL`, taskID)
-	if err != nil {
-		return 0, "", 0, "", err
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return 0, "", 0, "", err
-	}
-	if n == 0 {
-		// task either does not exist or is already claimed
-		var exists int
-		if err := tx.QueryRow(`SELECT 1 FROM tasks WHERE task_id = ?`, taskID).Scan(&exists); err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				return 0, "", 0, "", ErrNotFound
-			}
-			return 0, "", 0, "", err
+	// ensure task exists
+	var exists int
+	if err := tx.QueryRow(`SELECT 1 FROM tasks WHERE task_id = ?`, taskID).Scan(&exists); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, "", 0, "", ErrNotFound
 		}
-		return 0, "", 0, "", ErrInProgress
+		return 0, "", 0, "", err
 	}
 
 	// compute next attempt_num
 	var maxNum sql.NullInt64
 	if err := tx.QueryRow(`SELECT MAX(attempt_num) FROM attempts WHERE task_id = ? AND role = ?`, taskID, role).Scan(&maxNum); err != nil {
-		// release claim
-		_ = tx.Rollback()
 		return 0, "", 0, "", err
 	}
 	next := int64(1)
@@ -291,32 +277,36 @@ func (s *Store) CreateAttempt(taskID, role string) (int64, string, int64, string
 		next = maxNum.Int64 + 1
 	}
 
-	// insert with empty artifacts_dir first
+	// insert attempt with empty artifacts_dir
 	startedAt := time.Now().UTC().Format(time.RFC3339Nano)
-	res2, err := tx.Exec(`INSERT INTO attempts (task_id, role, attempt_num, status, started_at, artifacts_dir) VALUES (?, ?, ?, ?, ?, ?)`, taskID, role, next, "running", startedAt, "")
+	res, err := tx.Exec(`INSERT INTO attempts (task_id, role, attempt_num, status, started_at, artifacts_dir) VALUES (?, ?, ?, ?, ?, ?)`, taskID, role, next, "running", startedAt, "")
 	if err != nil {
-		// release claim
-		_ = tx.Rollback()
 		return 0, "", 0, "", err
 	}
-	id, err := res2.LastInsertId()
+	id, err := res.LastInsertId()
 	if err != nil {
-		_ = tx.Rollback()
 		return 0, "", 0, "", err
 	}
 
-	// new layout: attempts are stored under .molecular/runs/<task_id>/attempts/<attempt_id>
+	// set artifacts_dir
 	artifactsDir := filepath.ToSlash(filepath.Join(".molecular", "runs", taskID, "attempts", fmt.Sprintf("%d", id)))
-
 	if _, err := tx.Exec(`UPDATE attempts SET artifacts_dir = ? WHERE id = ?`, artifactsDir, id); err != nil {
-		_ = tx.Rollback()
 		return 0, "", 0, "", err
 	}
 
-	// replace sentinel with real attempt id
-	if _, err := tx.Exec(`UPDATE tasks SET current_attempt_id = ? WHERE task_id = ? AND current_attempt_id = -1`, id, taskID); err != nil {
-		_ = tx.Rollback()
+	// try to claim the task slot; if someone else claimed, abort and rollback
+	res2, err := tx.Exec(`UPDATE tasks SET current_attempt_id = ? WHERE task_id = ? AND current_attempt_id IS NULL`, id, taskID)
+	if err != nil {
 		return 0, "", 0, "", err
+	}
+	n, err := res2.RowsAffected()
+	if err != nil {
+		return 0, "", 0, "", err
+	}
+	if n == 0 {
+		// another in-flight attempt exists; rollback so our inserted attempt is not persisted
+		_ = tx.Rollback()
+		return 0, "", 0, "", ErrInProgress
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -345,10 +335,10 @@ func (s *Store) UpdateAttemptStatus(attemptID int64, status, errorSummary string
 
 func (s *Store) GetAttempt(taskID string, attemptID int64) (*api.Attempt, error) {
 	row := s.db.QueryRow(`
- SELECT id, task_id, role, attempt_num, status, started_at, COALESCE(finished_at, ''), artifacts_dir, COALESCE(error_summary, '')
- FROM attempts
- WHERE task_id = ? AND id = ?
- `, taskID, attemptID)
+ 	SELECT id, task_id, role, attempt_num, status, started_at, COALESCE(finished_at, ''), artifacts_dir, COALESCE(error_summary, '')
+ 	FROM attempts
+ 	WHERE task_id = ? AND id = ?
+ 	`, taskID, attemptID)
 	var a api.Attempt
 
 	if err := row.Scan(&a.ID, &a.TaskID, &a.Role, &a.AttemptNum, &a.Status, &a.StartedAt, &a.FinishedAt, &a.ArtifactsDir, &a.ErrorSummary); err != nil {
@@ -362,12 +352,12 @@ func (s *Store) GetAttempt(taskID string, attemptID int64) (*api.Attempt, error)
 
 func (s *Store) GetLatestAttempt(taskID string) (*api.Attempt, error) {
 	row := s.db.QueryRow(`
- SELECT id, task_id, role, attempt_num, status, started_at, COALESCE(finished_at, ''), artifacts_dir, COALESCE(error_summary, '')
- FROM attempts
- WHERE task_id = ?
- ORDER BY id DESC
- LIMIT 1
- `, taskID)
+ 	SELECT id, task_id, role, attempt_num, status, started_at, COALESCE(finished_at, ''), artifacts_dir, COALESCE(error_summary, '')
+ 	FROM attempts
+ 	WHERE task_id = ?
+ 	ORDER BY id DESC
+ 	LIMIT 1
+ 	`, taskID)
 	var a api.Attempt
 
 	if err := row.Scan(&a.ID, &a.TaskID, &a.Role, &a.AttemptNum, &a.Status, &a.StartedAt, &a.FinishedAt, &a.ArtifactsDir, &a.ErrorSummary); err != nil {
@@ -381,12 +371,12 @@ func (s *Store) GetLatestAttempt(taskID string) (*api.Attempt, error) {
 
 func (s *Store) GetLatestAttemptByRole(taskID string, role string) (*api.Attempt, error) {
 	row := s.db.QueryRow(`
- SELECT id, task_id, role, attempt_num, status, started_at, COALESCE(finished_at, ''), artifacts_dir, COALESCE(error_summary, '')
- FROM attempts
- WHERE task_id = ? AND role = ?
- ORDER BY id DESC
- LIMIT 1
- `, taskID, role)
+ 	SELECT id, task_id, role, attempt_num, status, started_at, COALESCE(finished_at, ''), artifacts_dir, COALESCE(error_summary, '')
+ 	FROM attempts
+ 	WHERE task_id = ? AND role = ?
+ 	ORDER BY id DESC
+ 	LIMIT 1
+ 	`, taskID, role)
 	var a api.Attempt
 
 	if err := row.Scan(&a.ID, &a.TaskID, &a.Role, &a.AttemptNum, &a.Status, &a.StartedAt, &a.FinishedAt, &a.ArtifactsDir, &a.ErrorSummary); err != nil {
