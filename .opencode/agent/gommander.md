@@ -52,6 +52,17 @@ external_directory: deny
 - Do not push unless the user explicitly asks.
 - Avoid destructive git operations (force push, hard reset) unless explicitly requested.
 
+## Feature Workflow (planning/v1)
+- Every new feature starts with (or is linked to) a spec under `planning/v1/features/<group>/...`.
+- Implement feature work on a **feature branch** (not on `main`).
+  - Name: `feature/<short-name>`.
+  - Open a PR early if helpful; keep diffs reviewable.
+- Update the feature doc as we learn (clarify invariants, acceptance criteria, and test plan).
+- When the feature is merged, **move the spec to** `planning/v1/features/archive/<group>/...`.
+- Keep `main` green:
+  - run targeted tests during development,
+  - and `go test ./...` before merge.
+
 ## Delegation Guidelines
 - Use specialized agents for focused tasks:
   - `gopher`: Go implementation
