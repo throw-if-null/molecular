@@ -700,17 +700,19 @@ func (s *Store) ReconcileInFlightAttempts(repoRoot string) error {
 
 		// Best-effort write artifacts
 		if a.artifactsDir != "" && repoRoot != "" {
-			fullDir := filepath.Join(repoRoot, a.artifactsDir)
-			_ = os.MkdirAll(fullDir, 0o755)
-			_ = os.WriteFile(filepath.Join(fullDir, "result.json"), []byte(`{"status":"failed","note":"crash recovery","role":"`+a.role+`"}`), 0o644)
-			// append or create log.txt with crash note
-			logPath := filepath.Join(fullDir, "log.txt")
-			existing := []byte{}
-			if b, err := os.ReadFile(logPath); err == nil {
-				existing = b
+			fullDir, ferr := paths.SafeJoin(repoRoot, a.artifactsDir)
+			if ferr == nil {
+				_ = os.MkdirAll(fullDir, 0o755)
+				_ = os.WriteFile(filepath.Join(fullDir, "result.json"), []byte(`{"status":"failed","note":"crash recovery","role":"`+a.role+`"}`), 0o644)
+				// append or create log.txt with crash note
+				logPath := filepath.Join(fullDir, "log.txt")
+				existing := []byte{}
+				if b, err := os.ReadFile(logPath); err == nil {
+					existing = b
+				}
+				prefix := []byte("crash recovery: silicon restart\n")
+				_ = os.WriteFile(logPath, append(prefix, existing...), 0o644)
 			}
-			prefix := []byte("crash recovery: silicon restart\n")
-			_ = os.WriteFile(logPath, append(prefix, existing...), 0o644)
 		}
 	}
 
