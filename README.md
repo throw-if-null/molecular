@@ -54,10 +54,18 @@ go build ./cmd/molecular
 
 ## Run Silicon
 
-Run the daemon (defaults to `127.0.0.1:8711`):
+Run the daemon (defaults to `127.0.0.1:8711`). You can use either the built binary or `go run`.
+
+Built binary:
 
 ```sh
 ./silicon
+```
+
+(or)
+
+```sh
+go run ./cmd/silicon
 ```
 
 Health check:
@@ -65,6 +73,115 @@ Health check:
 ```sh
 curl -s http://127.0.0.1:8711/healthz
 ```
+
+## End-to-end demo (stubbed pipeline)
+
+This repo currently includes a stubbed but end-to-end pipeline:
+- Lithium creates/ensures the worktree (and optionally runs a hook)
+- Carbon/Helium/Chlorine record attempts and transition phases deterministically
+
+Even though Carbon/Helium are stubbed today, the UX/persistence/artifacts flow is real and you can test it end-to-end.
+
+### 0) (Optional) configure hooks
+
+If you want to see hook execution in attempt logs:
+
+```sh
+mkdir -p .molecular
+cat > .molecular/lithium.sh <<'EOF'
+#!/bin/sh
+set -eu
+
+echo "lithium hook ran"
+EOF
+chmod +x .molecular/lithium.sh
+
+cat > .molecular/chlorine.sh <<'EOF'
+#!/bin/sh
+set -eu
+
+echo "chlorine hook ran"
+EOF
+chmod +x .molecular/chlorine.sh
+```
+
+### 1) Build
+
+```sh
+go build ./cmd/silicon
+
+go build ./cmd/molecular
+```
+
+### 2) Start Silicon
+
+In one terminal:
+
+```sh
+./silicon
+```
+
+### 3) Submit a task
+
+In another terminal:
+
+```sh
+./molecular submit --task-id demo --prompt "hello world"
+```
+
+### 4) Watch status until completion
+
+`molecular status` will show task phase/status and the latest attempt summary.
+
+```sh
+./molecular status demo
+```
+
+For scripting/debugging:
+
+```sh
+./molecular status --json demo
+```
+
+### 5) Inspect logs and artifacts
+
+Fetch attempt logs via the logs endpoint (note: logs have a hard size cap):
+
+```sh
+./molecular logs demo
+./molecular logs demo --tail 200
+```
+
+You can also inspect artifacts directly on disk:
+
+```sh
+ls -R .molecular/runs/demo
+```
+
+### 6) Try cancellation
+
+Cancellation sets task status to `cancelled` and attempts try to stop quickly.
+
+```sh
+./molecular cancel demo
+```
+
+### 7) Cleanup worktree + artifacts
+
+Cleanup is idempotent and only deletes repo-local filesystem state:
+- `.molecular/worktrees/<task_id>`
+- `.molecular/runs/<task_id>`
+
+DB history is preserved.
+
+```sh
+./molecular cleanup demo
+```
+
+### Notes on future “real execution”
+
+Carbon and Helium are intended to run external commands (e.g. `opencode run --agent carbon ...` / `opencode run --agent helium ...`) and stream stdout/stderr into attempt logs. Cancellation is designed to terminate those processes via context cancellation.
+
 
 ## Use the CLI
 
@@ -92,7 +209,7 @@ Cancel a task:
 ./molecular cancel demo
 ```
 
-Fetch logs (currently a placeholder response; artifacts contain attempt logs):
+Fetch logs:
 
 ```sh
 ./molecular logs demo
@@ -126,7 +243,7 @@ Primary endpoints:
 - `GET /v1/tasks/{task_id}`
 - `GET /v1/tasks` (supports `?limit=`)
 - `POST /v1/tasks/{task_id}/cancel`
-- `GET /v1/tasks/{task_id}/logs` (currently a placeholder JSON response)
+- `GET /v1/tasks/{task_id}/logs` (text/plain; supports `?tail=` and filters)
 
 ## Roadmap
 
