@@ -102,18 +102,79 @@ func TestListCancelLogsEndpoints(t *testing.T) {
 		t.Fatalf("cancel status: %v", cres.Status)
 	}
 
-	// logs
+	// logs (when no attempts exist, expect 404)
 	lres, err := http.Get(ts.URL + "/v1/tasks/task-1/logs")
 	if err != nil {
 		t.Fatalf("logs: %v", err)
 	}
 	defer lres.Body.Close()
-	var logs map[string]interface{}
-	lb, _ := io.ReadAll(lres.Body)
-	if err := json.Unmarshal(lb, &logs); err != nil {
-		t.Fatalf("unmarshal logs: %v; body=%s", err, string(lb))
+	if lres.StatusCode != http.StatusNotFound {
+		b, _ := io.ReadAll(lres.Body)
+		t.Fatalf("expected 404 for logs with no attempts, got %s; body=%s", lres.Status, string(b))
 	}
-	if _, ok := logs["artifacts_root"]; !ok {
-		t.Fatalf("missing artifacts_root in logs")
+
+	// create an attempt and materialize its log file
+	attemptID, artifactsDir, _, _, err := s.CreateAttempt("task-1", "carbon")
+	if err != nil {
+		t.Fatalf("create attempt: %v", err)
+	}
+	if err := os.MkdirAll(artifactsDir, 0o755); err != nil {
+		t.Fatalf("mkdir artifacts: %v", err)
+	}
+	logPath := filepath.Join(artifactsDir, "log.txt")
+	if err := os.WriteFile(logPath, []byte("one\ntwo\nthree\n"), 0o644); err != nil {
+		t.Fatalf("write log: %v", err)
+	}
+
+	// latest attempt log
+	lres2, err := http.Get(ts.URL + "/v1/tasks/task-1/logs")
+	if err != nil {
+		t.Fatalf("logs2: %v", err)
+	}
+	defer lres2.Body.Close()
+	if lres2.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(lres2.Body)
+		t.Fatalf("expected 200, got %s; body=%s", lres2.Status, string(b))
+	}
+	b2, _ := io.ReadAll(lres2.Body)
+	if string(b2) != "one\ntwo\nthree\n" {
+		t.Fatalf("unexpected logs body: %q", string(b2))
+	}
+
+	// tail
+	lres3, err := http.Get(ts.URL + "/v1/tasks/task-1/logs?tail=2")
+	if err != nil {
+		t.Fatalf("logs3: %v", err)
+	}
+	defer lres3.Body.Close()
+	if lres3.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(lres3.Body)
+		t.Fatalf("expected 200, got %s; body=%s", lres3.Status, string(b))
+	}
+	b3, _ := io.ReadAll(lres3.Body)
+	if string(b3) != "two\nthree" {
+		t.Fatalf("unexpected tail body: %q", string(b3))
+	}
+
+	// by attempt id
+	lres4, err := http.Get(ts.URL + fmt.Sprintf("/v1/tasks/task-1/logs?attempt_id=%d", attemptID))
+	if err != nil {
+		t.Fatalf("logs4: %v", err)
+	}
+	defer lres4.Body.Close()
+	if lres4.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(lres4.Body)
+		t.Fatalf("expected 200, got %s; body=%s", lres4.Status, string(b))
+	}
+
+	// by role
+	lres5, err := http.Get(ts.URL + "/v1/tasks/task-1/logs?role=carbon")
+	if err != nil {
+		t.Fatalf("logs5: %v", err)
+	}
+	defer lres5.Body.Close()
+	if lres5.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(lres5.Body)
+		t.Fatalf("expected 200, got %s; body=%s", lres5.Status, string(b))
 	}
 }

@@ -207,17 +207,18 @@ func logsWithClient(args []string, client *http.Client, baseURL string, out io.W
 	fs := flag.NewFlagSet("logs", flag.ContinueOnError)
 	fs.SetOutput(errOut)
 	var tail int
-	fs.IntVar(&tail, "tail", 0, "tail last N lines (not supported)")
+	fs.IntVar(&tail, "tail", 0, "tail last N lines")
 	_ = fs.Parse(args)
 	if fs.NArg() != 1 {
 		usage(errOut)
 		return 2
 	}
 	taskID := fs.Arg(0)
+	u := baseURL + "/v1/tasks/" + taskID + "/logs"
 	if tail > 0 {
-		fmt.Fprintln(errOut, "warning: --tail is not supported yet; ignoring")
+		u = u + fmt.Sprintf("?tail=%d", tail)
 	}
-	resp, err := client.Get(baseURL + "/v1/tasks/" + taskID + "/logs")
+	resp, err := client.Get(u)
 	if err != nil {
 		fmt.Fprintln(errOut, err.Error())
 		return 1
