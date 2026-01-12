@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"time"
 )
 
 // Config holds settings for a Lithium run.
@@ -55,7 +54,7 @@ func (r *Runner) EnsureWorktree(ctx context.Context) (string, error) {
 	// build args: worktree add -b <branch> <path> <base>
 	args := []string{"worktree", "add", "-b", branch, wt, base}
 
-	out, err := r.exe.Run(ctx, r.cfg.RepoRoot, "git", args...)
+	_, err := r.exe.Run(ctx, r.cfg.RepoRoot, "git", args...)
 	if err != nil {
 		return "", fmt.Errorf("git worktree add failed: %w", err)
 	}
