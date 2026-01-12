@@ -12,10 +12,14 @@ import (
 
 // StartLithiumWorker starts a background goroutine that polls for tasks in phase 'lithium'
 // and runs the lithium Runner. It returns a cancel func to stop the worker.
-func StartLithiumWorker(ctx context.Context, s Store, repoRoot string, exe lithium.ExecRunner) context.CancelFunc {
+// interval controls the worker polling interval. If zero, defaults to 1s.
+func StartLithiumWorker(ctx context.Context, s Store, repoRoot string, exe lithium.ExecRunner, interval time.Duration) context.CancelFunc {
 	ctx, cancel := context.WithCancel(ctx)
 	go func() {
-		ticker := time.NewTicker(1 * time.Second)
+		if interval <= 0 {
+			interval = 1 * time.Second
+		}
+		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		for {
 			select {
@@ -53,10 +57,14 @@ func StartLithiumWorker(ctx context.Context, s Store, repoRoot string, exe lithi
 // and runs a stubbed carbon worker in-process. It creates attempt records and writes
 // placeholder artifacts (carbon_result.json, log.txt) under the attempt artifacts dir.
 // After a successful stub run the task is transitioned to phase 'helium'.
-func StartCarbonWorker(ctx context.Context, s Store, repoRoot string) context.CancelFunc {
+// interval controls the worker polling interval. If zero, defaults to 1s.
+func StartCarbonWorker(ctx context.Context, s Store, repoRoot string, interval time.Duration) context.CancelFunc {
 	ctx, cancel := context.WithCancel(ctx)
 	go func() {
-		ticker := time.NewTicker(1 * time.Second)
+		if interval <= 0 {
+			interval = 1 * time.Second
+		}
+		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		for {
 			select {
@@ -113,10 +121,14 @@ func StartCarbonWorker(ctx context.Context, s Store, repoRoot string) context.Ca
 // and runs a stubbed helium inspector worker. It creates attempt records and writes
 // placeholder artifacts (helium_result.json, log.txt) under the attempt artifacts dir.
 // After a successful stub run the task is transitioned to phase 'chlorine'.
-func StartHeliumWorker(ctx context.Context, s Store, repoRoot string) context.CancelFunc {
+// interval controls the worker polling interval. If zero, defaults to 1s.
+func StartHeliumWorker(ctx context.Context, s Store, repoRoot string, interval time.Duration) context.CancelFunc {
 	ctx, cancel := context.WithCancel(ctx)
 	go func() {
-		ticker := time.NewTicker(1 * time.Second)
+		if interval <= 0 {
+			interval = 1 * time.Second
+		}
+		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		for {
 			select {
