@@ -1,6 +1,9 @@
-# v1 product checklist
+# v1 product checklist (deprecated)
 
-This file tracks the work needed to ship a real v1 of Molecular (beyond the current “scaffolding”).
+This file has been superseded by feature-specific planning docs.
+
+Start here instead:
+- `planning/v1/README.md`
 
 Guiding principles:
 - Keep the default experience working with **zero config**.

@@ -132,4 +132,4 @@ Primary endpoints:
 
 High-level roadmap lives in `ROADMAP.md`.
 
-For a more structured “v1 product” checklist, see `planning/v1/TODO.md`.
+For a more structured “v1 product” checklist, see `planning/v1/README.md`.
