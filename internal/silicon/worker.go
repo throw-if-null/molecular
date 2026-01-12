@@ -161,6 +161,18 @@ func StartHeliumWorker(ctx context.Context, s Store, repoRoot string, interval t
 						// ensure dir exists under repoRoot
 						fullDir := filepath.Join(repoRoot, artifactsDir)
 						_ = os.MkdirAll(fullDir, 0o755)
+						// write meta for helium attempt
+						meta := map[string]interface{}{
+							"task_id":     t.TaskID,
+							"attempt_id":  attemptID,
+							"role":        "helium",
+							"attempt_num": attemptNum,
+							"status":      "running",
+							"started_at":  startedAt,
+						}
+						if mb, err := json.Marshal(meta); err == nil {
+							_ = os.WriteFile(filepath.Join(fullDir, "meta.json"), mb, 0o644)
+						}
 						// simulate transient failure or request changes deterministically based on prompt
 						if strings.Contains(t.Prompt, "helium-fail") {
 							newCount, err := s.IncrementHeliumRetries(t.TaskID)
@@ -246,8 +258,18 @@ func StartChlorineWorker(ctx context.Context, s Store, repoRoot string, interval
 						}
 						fullDir := filepath.Join(repoRoot, artifactsDir)
 						_ = os.MkdirAll(fullDir, 0o755)
-						// write final summary and log
-						_ = os.WriteFile(filepath.Join(fullDir, "final_summary.json"), []byte(`{"status":"completed","note":"stub"}`), 0o644)
+						meta := map[string]interface{}{
+							"task_id":     t.TaskID,
+							"attempt_id":  attemptID,
+							"role":        "chlorine",
+							"attempt_num": attemptNum,
+							"status":      "running",
+							"started_at":  startedAt,
+						}
+						if mb, err := json.Marshal(meta); err == nil {
+							_ = os.WriteFile(filepath.Join(fullDir, "meta.json"), mb, 0o644)
+						}
+						_ = os.WriteFile(filepath.Join(fullDir, "result.json"), []byte(`{"status":"completed","note":"stub","role":"chlorine"}`), 0o644)
 						_ = os.WriteFile(filepath.Join(fullDir, "log.txt"), []byte("chlorine stub run\n"), 0o644)
 						// mark attempt ok
 						_ = s.UpdateAttemptStatus(attemptID, "ok", "")
