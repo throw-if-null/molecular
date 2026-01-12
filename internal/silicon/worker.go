@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/throw-if-null/molecular/internal/lithium"
+	"github.com/throw-if-null/molecular/internal/paths"
 	"github.com/throw-if-null/molecular/internal/store"
 )
 
@@ -64,7 +65,13 @@ func StartLithiumWorker(ctx context.Context, s Store, repoRoot string, exe lithi
 					}
 
 					if cancelled, cerr := s.IsTaskCancelled(t.TaskID); cerr == nil && cancelled {
-						fullDir := filepath.Join(repoRoot, artifactsDir)
+						fullDir, ferr := paths.SafeJoin(repoRoot, artifactsDir)
+						if ferr != nil {
+							// skip attempt if path unsafe
+							_, _ = s.UpdateAttemptStatus(attemptID, "failed", ferr.Error())
+							continue
+						}
+
 						_ = os.MkdirAll(fullDir, 0o755)
 						_ = os.WriteFile(filepath.Join(fullDir, "result.json"), []byte(`{"status":"cancelled","role":"lithium"}`), 0o644)
 						_, _ = s.UpdateAttemptStatus(attemptID, "cancelled", "cancelled")
@@ -79,7 +86,13 @@ func StartLithiumWorker(ctx context.Context, s Store, repoRoot string, exe lithi
 						defer UnregisterAttemptCanceler(t.TaskID)
 						defer attemptCancel()
 
-						fullDir := filepath.Join(repoRoot, artifactsDir)
+						fullDir, ferr := paths.SafeJoin(repoRoot, artifactsDir)
+						if ferr != nil {
+							// skip attempt if path unsafe
+							_, _ = s.UpdateAttemptStatus(attemptID, "failed", ferr.Error())
+							updateTaskPhaseWithRetries(s, t.TaskID, "lithium", "failed")
+							return
+						}
 						_ = os.MkdirAll(fullDir, 0o755)
 
 						wtPath, err := r.EnsureWorktree(attemptCtx)
@@ -222,7 +235,13 @@ func StartCarbonWorker(ctx context.Context, s Store, repoRoot string, interval t
 						// if task was cancelled between polling and attempt creation,
 						// mark the attempt cancelled and skip doing work.
 						if cancelled, cerr := s.IsTaskCancelled(t.TaskID); cerr == nil && cancelled {
-							fullDir := filepath.Join(repoRoot, artifactsDir)
+							fullDir, ferr := paths.SafeJoin(repoRoot, artifactsDir)
+							if ferr != nil {
+								// skip attempt if path unsafe
+								_, _ = s.UpdateAttemptStatus(attemptID, "failed", ferr.Error())
+								continue
+							}
+
 							_ = os.MkdirAll(fullDir, 0o755)
 							_ = os.WriteFile(filepath.Join(fullDir, "result.json"), []byte(`{"status":"cancelled","role":"carbon"}`), 0o644)
 							_ = os.WriteFile(filepath.Join(fullDir, "log.txt"), []byte(crashNote+"cancelled\n"), 0o644)
@@ -230,7 +249,13 @@ func StartCarbonWorker(ctx context.Context, s Store, repoRoot string, interval t
 							continue
 						}
 						// ensure dir exists under repoRoot
-						fullDir := filepath.Join(repoRoot, artifactsDir)
+						fullDir, ferr := paths.SafeJoin(repoRoot, artifactsDir)
+						if ferr != nil {
+							// skip attempt if path unsafe
+							_, _ = s.UpdateAttemptStatus(attemptID, "failed", ferr.Error())
+							continue
+						}
+
 						_ = os.MkdirAll(fullDir, 0o755)
 						// write meta, placeholder result and log
 						meta := map[string]interface{}{
@@ -310,7 +335,13 @@ func StartHeliumWorker(ctx context.Context, s Store, repoRoot string, interval t
 							continue
 						}
 						if cancelled, cerr := s.IsTaskCancelled(t.TaskID); cerr == nil && cancelled {
-							fullDir := filepath.Join(repoRoot, artifactsDir)
+							fullDir, ferr := paths.SafeJoin(repoRoot, artifactsDir)
+							if ferr != nil {
+								// skip attempt if path unsafe
+								_, _ = s.UpdateAttemptStatus(attemptID, "failed", ferr.Error())
+								continue
+							}
+
 							_ = os.MkdirAll(fullDir, 0o755)
 							_ = os.WriteFile(filepath.Join(fullDir, "result.json"), []byte(`{"status":"cancelled","role":"helium"}`), 0o644)
 							_ = os.WriteFile(filepath.Join(fullDir, "log.txt"), []byte("cancelled\n"), 0o644)
@@ -318,7 +349,13 @@ func StartHeliumWorker(ctx context.Context, s Store, repoRoot string, interval t
 							continue
 						}
 						// ensure dir exists under repoRoot
-						fullDir := filepath.Join(repoRoot, artifactsDir)
+						fullDir, ferr := paths.SafeJoin(repoRoot, artifactsDir)
+						if ferr != nil {
+							// skip attempt if path unsafe
+							_, _ = s.UpdateAttemptStatus(attemptID, "failed", ferr.Error())
+							continue
+						}
+
 						_ = os.MkdirAll(fullDir, 0o755)
 						// write meta for helium attempt
 						meta := map[string]interface{}{
@@ -421,14 +458,26 @@ func StartChlorineWorker(ctx context.Context, s Store, repoRoot string, interval
 							continue
 						}
 						if cancelled, cerr := s.IsTaskCancelled(t.TaskID); cerr == nil && cancelled {
-							fullDir := filepath.Join(repoRoot, artifactsDir)
+							fullDir, ferr := paths.SafeJoin(repoRoot, artifactsDir)
+							if ferr != nil {
+								// skip attempt if path unsafe
+								_, _ = s.UpdateAttemptStatus(attemptID, "failed", ferr.Error())
+								continue
+							}
+
 							_ = os.MkdirAll(fullDir, 0o755)
 							_ = os.WriteFile(filepath.Join(fullDir, "result.json"), []byte(`{"status":"cancelled","role":"chlorine"}`), 0o644)
 							_ = os.WriteFile(filepath.Join(fullDir, "log.txt"), []byte("cancelled\n"), 0o644)
 							_, _ = s.UpdateAttemptStatus(attemptID, "cancelled", "cancelled")
 							continue
 						}
-						fullDir := filepath.Join(repoRoot, artifactsDir)
+						fullDir, ferr := paths.SafeJoin(repoRoot, artifactsDir)
+						if ferr != nil {
+							// skip attempt if path unsafe
+							_, _ = s.UpdateAttemptStatus(attemptID, "failed", ferr.Error())
+							continue
+						}
+
 						_ = os.MkdirAll(fullDir, 0o755)
 						meta := map[string]interface{}{
 							"task_id":     t.TaskID,

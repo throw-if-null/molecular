@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/throw-if-null/molecular/internal/api"
+	"github.com/throw-if-null/molecular/internal/paths"
 	"github.com/throw-if-null/molecular/internal/store"
 )
 
@@ -77,6 +78,11 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := paths.ValidateTaskID(req.TaskID); err != nil {
+		http.Error(w, "invalid task_id", http.StatusBadRequest)
+		return
+	}
+
 	task, existed, err := s.store.CreateTaskWithBudgets(&req, s.carbonBudget, s.heliumBudget, s.reviewBudget)
 	if err != nil {
 		http.Error(w, "failed to create task", http.StatusInternalServerError)
@@ -96,6 +102,14 @@ func (s *Server) handleGetTask(w http.ResponseWriter, r *http.Request) {
 	taskID := r.PathValue("task_id")
 	if taskID == "" {
 		http.Error(w, "missing task_id", http.StatusBadRequest)
+		return
+	}
+	if err := paths.ValidateTaskID(taskID); err != nil {
+		http.Error(w, "invalid task_id", http.StatusBadRequest)
+		return
+	}
+	if err := paths.ValidateTaskID(taskID); err != nil {
+		http.Error(w, "invalid task_id", http.StatusBadRequest)
 		return
 	}
 
@@ -161,6 +175,10 @@ func (s *Server) handleGetTaskLogs(w http.ResponseWriter, r *http.Request) {
 	taskID := r.PathValue("task_id")
 	if taskID == "" {
 		http.Error(w, "missing task_id", http.StatusBadRequest)
+		return
+	}
+	if err := paths.ValidateTaskID(taskID); err != nil {
+		http.Error(w, "invalid task_id", http.StatusBadRequest)
 		return
 	}
 

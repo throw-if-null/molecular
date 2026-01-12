@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/throw-if-null/molecular/internal/api"
+	"github.com/throw-if-null/molecular/internal/paths"
 )
 
 type Store struct {
@@ -110,8 +111,15 @@ func (s *Store) CreateTaskOrGetExisting(r *api.CreateTaskRequest) (*api.Task, bo
 func (s *Store) CreateTaskWithBudgets(r *api.CreateTaskRequest, carbonBudget, heliumBudget, reviewBudget int) (*api.Task, bool, error) {
 	createdAt := time.Now().UTC().Format(time.RFC3339Nano)
 	updatedAt := createdAt
-	artifactsRoot := filepath.ToSlash(filepath.Join(".molecular", "runs", r.TaskID))
-	worktreePath := filepath.ToSlash(filepath.Join(".molecular", "worktrees", r.TaskID))
+	// validate task id and build safe relative paths
+	artifactsRoot, aerr := paths.RunsDir(r.TaskID)
+	if aerr != nil {
+		return nil, false, aerr
+	}
+	worktreePath, werr := paths.WorktreeDir(r.TaskID)
+	if werr != nil {
+		return nil, false, werr
+	}
 
 	_, err := s.db.Exec(
 		`INSERT INTO tasks (task_id, prompt, status, phase, created_at, updated_at, carbon_budget, helium_budget, review_budget, artifacts_root, worktree_path) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -319,8 +327,11 @@ func (s *Store) CreateAttempt(taskID, role string) (int64, string, int64, string
 		return 0, "", 0, "", err
 	}
 
-	// set artifacts_dir
-	artifactsDir := filepath.ToSlash(filepath.Join(".molecular", "runs", taskID, "attempts", fmt.Sprintf("%d", id)))
+	// set artifacts_dir (validated)
+	artifactsDir, aerr := paths.AttemptDir(taskID, id)
+	if aerr != nil {
+		return 0, "", 0, "", aerr
+	}
 	if _, err := tx.Exec(`UPDATE attempts SET artifacts_dir = ? WHERE id = ?`, artifactsDir, id); err != nil {
 		return 0, "", 0, "", err
 	}
@@ -689,17 +700,19 @@ func (s *Store) ReconcileInFlightAttempts(repoRoot string) error {
 
 		// Best-effort write artifacts
 		if a.artifactsDir != "" && repoRoot != "" {
-			fullDir := filepath.Join(repoRoot, a.artifactsDir)
-			_ = os.MkdirAll(fullDir, 0o755)
-			_ = os.WriteFile(filepath.Join(fullDir, "result.json"), []byte(`{"status":"failed","note":"crash recovery","role":"`+a.role+`"}`), 0o644)
-			// append or create log.txt with crash note
-			logPath := filepath.Join(fullDir, "log.txt")
-			existing := []byte{}
-			if b, err := os.ReadFile(logPath); err == nil {
-				existing = b
+			fullDir, ferr := paths.SafeJoin(repoRoot, a.artifactsDir)
+			if ferr == nil {
+				_ = os.MkdirAll(fullDir, 0o755)
+				_ = os.WriteFile(filepath.Join(fullDir, "result.json"), []byte(`{"status":"failed","note":"crash recovery","role":"`+a.role+`"}`), 0o644)
+				// append or create log.txt with crash note
+				logPath := filepath.Join(fullDir, "log.txt")
+				existing := []byte{}
+				if b, err := os.ReadFile(logPath); err == nil {
+					existing = b
+				}
+				prefix := []byte("crash recovery: silicon restart\n")
+				_ = os.WriteFile(logPath, append(prefix, existing...), 0o644)
 			}
-			prefix := []byte("crash recovery: silicon restart\n")
-			_ = os.WriteFile(logPath, append(prefix, existing...), 0o644)
 		}
 	}
 
