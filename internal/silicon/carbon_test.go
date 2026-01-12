@@ -22,6 +22,8 @@ func setupTestStoreWithDB(t *testing.T) (*store.Store, *sql.DB, string, func()) 
 	}
 	dbpath := filepath.Join(td, "molecular.db")
 	db, err := sql.Open("sqlite", dbpath)
+	// configure busy timeout to reduce SQLITE_BUSY transient failures
+	_, _ = db.Exec(`PRAGMA busy_timeout = 5000`)
 	if err != nil {
 		os.RemoveAll(td)
 		t.Fatalf("open db: %v", err)
