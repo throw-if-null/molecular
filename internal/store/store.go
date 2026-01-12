@@ -110,8 +110,15 @@ func (s *Store) CreateTaskOrGetExisting(r *api.CreateTaskRequest) (*api.Task, bo
 func (s *Store) CreateTaskWithBudgets(r *api.CreateTaskRequest, carbonBudget, heliumBudget, reviewBudget int) (*api.Task, bool, error) {
 	createdAt := time.Now().UTC().Format(time.RFC3339Nano)
 	updatedAt := createdAt
-	artifactsRoot := filepath.ToSlash(filepath.Join(".molecular", "runs", r.TaskID))
-	worktreePath := filepath.ToSlash(filepath.Join(".molecular", "worktrees", r.TaskID))
+	// validate task id and build safe relative paths
+	artifactsRoot, aerr := paths.RunsDir(r.TaskID)
+	if aerr != nil {
+		return nil, false, aerr
+	}
+	worktreePath, werr := paths.WorktreeDir(r.TaskID)
+	if werr != nil {
+		return nil, false, werr
+	}
 
 	_, err := s.db.Exec(
 		`INSERT INTO tasks (task_id, prompt, status, phase, created_at, updated_at, carbon_budget, helium_budget, review_budget, artifacts_root, worktree_path) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
