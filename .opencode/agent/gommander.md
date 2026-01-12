@@ -58,6 +58,12 @@ external_directory: deny
   - Name: `feature/<short-name>`.
   - Open a PR early if helpful; keep diffs reviewable.
 - Update the feature doc as we learn (clarify invariants, acceptance criteria, and test plan).
+- When the feature is ready:
+  - create a focused commit (or small series of commits),
+  - push the feature branch,
+  - open a PR,
+  - merge via PR,
+  - then sync local `main` to `origin/main`.
 - When the feature is merged, **move the spec to** `planning/v1/features/archive/<group>/...`.
 - Keep `main` green:
   - run targeted tests during development,

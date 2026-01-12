@@ -21,6 +21,9 @@ type Server struct {
 	reviewBudget int
 }
 
+// maximum number of bytes we'll allow reading for a task log
+const maxLogBytes = 5 << 20 // 5 MiB
+
 type Store interface {
 	CreateTaskOrGetExisting(r *api.CreateTaskRequest) (*api.Task, bool, error)
 	CreateTaskWithBudgets(r *api.CreateTaskRequest, carbonBudget, heliumBudget, reviewBudget int) (*api.Task, bool, error)
@@ -202,6 +205,14 @@ func (s *Server) handleGetTaskLogs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	logPath := filepath.Join(attempt.ArtifactsDir, "log.txt")
+	// hard cap: avoid reading extremely large logs into memory
+	if fi, serr := os.Stat(logPath); serr == nil {
+		if fi.Size() > maxLogBytes {
+			http.Error(w, "log too large", http.StatusRequestEntityTooLarge)
+			return
+		}
+	}
+
 	b, err := os.ReadFile(logPath)
 	if errors.Is(err, os.ErrNotExist) {
 		http.Error(w, "not found", http.StatusNotFound)
