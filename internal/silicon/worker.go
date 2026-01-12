@@ -80,6 +80,23 @@ func StartCarbonWorker(ctx context.Context, s Store, repoRoot string) context.Ca
 						// write placeholder result and log
 						_ = os.WriteFile(filepath.Join(fullDir, "carbon_result.json"), []byte(`{"summary":"stub","complexity":"unknown"}`), 0o644)
 						_ = os.WriteFile(filepath.Join(fullDir, "log.txt"), []byte("carbon stub run\n"), 0o644)
+						// simulate transient failure deterministically based on prompt
+						if strings.Contains(t.Prompt, "carbon-fail") {
+							newCount, err := s.IncrementCarbonRetries(t.TaskID)
+							if err != nil {
+								_ = s.UpdateAttemptStatus(attemptID, "failed", "increment retry failed")
+								_ = s.UpdateTaskPhaseAndStatus(t.TaskID, "carbon", "failed")
+								continue
+							}
+							_ = s.UpdateAttemptStatus(attemptID, "failed", "transient failure")
+							if newCount >= t.CarbonBudget {
+								_ = s.UpdateTaskPhaseAndStatus(t.TaskID, "carbon", "failed")
+							} else {
+								_ = s.UpdateTaskPhaseAndStatus(t.TaskID, "carbon", "running")
+							}
+							continue
+						}
+
 						// mark attempt ok
 						_ = s.UpdateAttemptStatus(attemptID, "ok", "")
 						// transition task to helium (keep status running)
@@ -120,7 +137,45 @@ func StartHeliumWorker(ctx context.Context, s Store, repoRoot string) context.Ca
 						// ensure dir exists under repoRoot
 						fullDir := filepath.Join(repoRoot, artifactsDir)
 						_ = os.MkdirAll(fullDir, 0o755)
-						// write placeholder result and log. For now always approved.
+						// simulate transient failure or request changes deterministically based on prompt
+						if strings.Contains(t.Prompt, "helium-fail") {
+							newCount, err := s.IncrementHeliumRetries(t.TaskID)
+							if err != nil {
+								_ = s.UpdateAttemptStatus(attemptID, "failed", "increment retry failed")
+								_ = s.UpdateTaskPhaseAndStatus(t.TaskID, "helium", "failed")
+								continue
+							}
+							_ = os.WriteFile(filepath.Join(fullDir, "helium_result.json"), []byte(`{"status":"failed"}`), 0o644)
+							_ = os.WriteFile(filepath.Join(fullDir, "log.txt"), []byte("helium transient failure\n"), 0o644)
+							_ = s.UpdateAttemptStatus(attemptID, "failed", "transient failure")
+							if newCount >= t.HeliumBudget {
+								_ = s.UpdateTaskPhaseAndStatus(t.TaskID, "helium", "failed")
+							} else {
+								_ = s.UpdateTaskPhaseAndStatus(t.TaskID, "helium", "running")
+							}
+							continue
+						}
+						if strings.Contains(t.Prompt, "needs-changes") {
+							// helium requests changes -> increment review counter and send back to carbon
+							newCount, err := s.IncrementReviewRetries(t.TaskID)
+							if err != nil {
+								_ = s.UpdateAttemptStatus(attemptID, "failed", "increment review failed")
+								_ = s.UpdateTaskPhaseAndStatus(t.TaskID, "helium", "failed")
+								continue
+							}
+							_ = os.WriteFile(filepath.Join(fullDir, "helium_result.json"), []byte(`{"status":"changes_requested"}`), 0o644)
+							_ = os.WriteFile(filepath.Join(fullDir, "log.txt"), []byte("helium requested changes\n"), 0o644)
+							_ = s.UpdateAttemptStatus(attemptID, "ok", "changes requested")
+							if newCount > t.ReviewBudget {
+								// exceeded review budget -> fail
+								_ = s.UpdateTaskPhaseAndStatus(t.TaskID, "helium", "failed")
+							} else {
+								// send back to carbon for a full review retry
+								_ = s.UpdateTaskPhaseAndStatus(t.TaskID, "carbon", "running")
+							}
+							continue
+						}
+						// otherwise approved
 						_ = os.WriteFile(filepath.Join(fullDir, "helium_result.json"), []byte(`{"status":"approved"}`), 0o644)
 						_ = os.WriteFile(filepath.Join(fullDir, "log.txt"), []byte("helium stub run\n"), 0o644)
 						// mark attempt ok
