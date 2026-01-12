@@ -15,6 +15,7 @@ type Task struct {
 	ArtifactsRoot    string     `json:"artifacts_root"`
 	WorktreePath     string     `json:"worktree_path"`
 	CurrentAttemptID *int64     `json:"current_attempt_id,omitempty"`
+	LatestAttempt    *Attempt   `json:"latest_attempt,omitempty"`
 }
 
 type CreateTaskRequest struct {
