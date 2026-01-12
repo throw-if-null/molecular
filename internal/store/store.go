@@ -364,7 +364,7 @@ func (s *Store) UpdateAttemptStatus(attemptID int64, status, errorSummary string
 				return
 			}
 
-			newCount := 0
+			newCount = 0
 			// if this attempt failed, increment role-specific retry counters
 			if status == "failed" {
 				switch role {
