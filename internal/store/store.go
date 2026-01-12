@@ -197,6 +197,12 @@ func (s *Store) CancelTask(taskID string) (bool, error) {
 	return true, nil
 }
 
+// UpdateTaskPhaseAndStatus updates the task's phase and status and sets updated_at.
+func (s *Store) UpdateTaskPhaseAndStatus(taskID, phase, status string) error {
+	_, err := s.db.Exec(`UPDATE tasks SET phase = ?, status = ?, updated_at = ? WHERE task_id = ?`, phase, status, time.Now().UTC().Format(time.RFC3339Nano), taskID)
+	return err
+}
+
 func isUniqueConstraintError(err error) bool {
 	if err == nil {
 		return false
