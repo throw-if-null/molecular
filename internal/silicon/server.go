@@ -60,6 +60,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/tasks", s.handleListTasks)
 	mux.HandleFunc("POST /v1/tasks/{task_id}/cancel", s.handleCancelTask)
 	mux.HandleFunc("GET /v1/tasks/{task_id}/logs", s.handleGetTaskLogs)
+	mux.HandleFunc("POST /v1/tasks/{task_id}/cleanup", s.handleCleanupTask)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
@@ -288,4 +289,64 @@ func tailLines(s string, n int) string {
 		return strings.Join(lines, "\n")
 	}
 	return strings.Join(lines[len(lines)-n:], "\n")
+}
+
+func (s *Server) handleCleanupTask(w http.ResponseWriter, r *http.Request) {
+	taskID := r.PathValue("task_id")
+	if taskID == "" {
+		http.Error(w, "missing task_id", http.StatusBadRequest)
+		return
+	}
+	if err := paths.ValidateTaskID(taskID); err != nil {
+		http.Error(w, "invalid task_id", http.StatusBadRequest)
+		return
+	}
+
+	// ensure task exists
+	task, err := s.store.GetTask(taskID)
+	if isNotFound(err) {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		http.Error(w, "failed to read task", http.StatusInternalServerError)
+		return
+	}
+
+	repoRoot, err := os.Getwd()
+	if err != nil {
+		http.Error(w, "server error", http.StatusInternalServerError)
+		return
+	}
+
+	// compute safe absolute paths for artifacts and worktree
+	artPath, aerr := paths.SafeJoin(repoRoot, task.ArtifactsRoot)
+	if aerr != nil {
+		http.Error(w, "invalid artifacts path", http.StatusInternalServerError)
+		return
+	}
+	wtPath, werr := paths.SafeJoin(repoRoot, task.WorktreePath)
+	if werr != nil {
+		http.Error(w, "invalid worktree path", http.StatusInternalServerError)
+		return
+	}
+
+	// Extra guard: ensure both paths contain .molecular segment
+	if !strings.Contains(filepath.ToSlash(artPath), ".molecular/") && !strings.HasSuffix(filepath.ToSlash(artPath), ".molecular") {
+		http.Error(w, "refusing to delete outside .molecular", http.StatusForbidden)
+		return
+	}
+	if !strings.Contains(filepath.ToSlash(wtPath), ".molecular/") && !strings.HasSuffix(filepath.ToSlash(wtPath), ".molecular") {
+		http.Error(w, "refusing to delete outside .molecular", http.StatusForbidden)
+		return
+	}
+
+	// Attempt to remove; idempotent by nature
+	artErr := os.RemoveAll(artPath)
+	wtErr := os.RemoveAll(wtPath)
+
+	// Build response
+	resp := map[string]bool{"artifacts": artErr == nil, "worktree": wtErr == nil}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
 }
