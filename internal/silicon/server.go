@@ -15,11 +15,15 @@ import (
 )
 
 type Server struct {
-	store Store
+	store        Store
+	carbonBudget int
+	heliumBudget int
+	reviewBudget int
 }
 
 type Store interface {
 	CreateTaskOrGetExisting(r *api.CreateTaskRequest) (*api.Task, bool, error)
+	CreateTaskWithBudgets(r *api.CreateTaskRequest, carbonBudget, heliumBudget, reviewBudget int) (*api.Task, bool, error)
 	GetTask(taskID string) (*api.Task, error)
 	ListTasks(limit int) ([]*api.Task, error)
 	CancelTask(taskID string) (bool, error)
@@ -30,9 +34,9 @@ type Store interface {
 	UpdateAttemptStatus(attemptID int64, status, errorSummary string) error
 
 	// Attempt queries for logs endpoint
-	GetAttempt(taskID string, attemptID int64) (*store.Attempt, error)
-	GetLatestAttempt(taskID string) (*store.Attempt, error)
-	GetLatestAttemptByRole(taskID string, role string) (*store.Attempt, error)
+	GetAttempt(taskID string, attemptID int64) (*api.Attempt, error)
+	GetLatestAttempt(taskID string) (*api.Attempt, error)
+	GetLatestAttemptByRole(taskID string, role string) (*api.Attempt, error)
 
 	// Retry counters
 	IncrementCarbonRetries(taskID string) (int, error)
@@ -40,8 +44,8 @@ type Store interface {
 	IncrementReviewRetries(taskID string) (int, error)
 }
 
-func NewServer(store Store) *Server {
-	return &Server{store: store}
+func NewServer(store Store, carbonBudget, heliumBudget, reviewBudget int) *Server {
+	return &Server{store: store, carbonBudget: carbonBudget, heliumBudget: heliumBudget, reviewBudget: reviewBudget}
 }
 
 func (s *Server) Handler() http.Handler {
@@ -69,7 +73,7 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	task, existed, err := s.store.CreateTaskOrGetExisting(&req)
+	task, existed, err := s.store.CreateTaskWithBudgets(&req, s.carbonBudget, s.heliumBudget, s.reviewBudget)
 	if err != nil {
 		http.Error(w, "failed to create task", http.StatusInternalServerError)
 		return
@@ -168,7 +172,7 @@ func (s *Server) handleGetTaskLogs(w http.ResponseWriter, r *http.Request) {
 	attemptIDStr := q.Get("attempt_id")
 	tailStr := q.Get("tail")
 
-	var attempt *store.Attempt
+	var attempt *api.Attempt
 	var err error
 
 	if attemptIDStr != "" {
@@ -234,7 +238,7 @@ func isValidRole(role string) bool {
 }
 
 func isNotFound(err error) bool {
-	return errors.Is(err, ErrNotFound) || errors.Is(err, store.ErrNotFound) || errors.Is(err, os.ErrNotExist)
+	return errors.Is(err, ErrNotFound) || errors.Is(err, os.ErrNotExist) || errors.Is(err, store.ErrNotFound)
 }
 
 func tailLines(s string, n int) string {

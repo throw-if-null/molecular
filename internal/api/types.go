@@ -21,3 +21,15 @@ type CreateTaskRequest struct {
 	TaskID string `json:"task_id"`
 	Prompt string `json:"prompt"`
 }
+
+type Attempt struct {
+	ID           int64  `json:"id"`
+	TaskID       string `json:"task_id"`
+	Role         string `json:"role"`
+	AttemptNum   int64  `json:"attempt_num"`
+	Status       string `json:"status"`
+	StartedAt    string `json:"started_at"`
+	FinishedAt   string `json:"finished_at"`
+	ArtifactsDir string `json:"artifacts_dir"`
+	ErrorSummary string `json:"error_summary"`
+}
