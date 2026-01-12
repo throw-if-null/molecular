@@ -51,6 +51,10 @@ func main() {
 
 	poll := time.Duration(cfgRes.Config.Silicon.PollIntervalMS) * time.Millisecond
 	ctx := context.Background()
+	// Reconcile any in-flight attempts from previous runs before starting workers.
+	if err := s.ReconcileInFlightAttempts(repoRoot); err != nil {
+		log.Printf("warning: reconcile in-flight attempts failed: %v", err)
+	}
 	lithCancel := silicon.StartLithiumWorker(ctx, s, repoRoot, &lithium.RealExecRunner{}, poll)
 	defer lithCancel()
 	carbonCancel := silicon.StartCarbonWorker(ctx, s, repoRoot, poll)

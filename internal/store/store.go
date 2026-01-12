@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/throw-if-null/molecular/internal/api"
@@ -581,4 +583,114 @@ func (s *Store) IncrementReviewRetries(taskID string) (int, error) {
 		return 0, err
 	}
 	return v, nil
+}
+
+// ReconcileInFlightAttempts marks attempts that were left in-flight due to a
+// silicon process crash as failed and clears any task current_attempt_id that
+// referenced them. It is safe to run multiple times (idempotent) and performs
+// best-effort artifact writes under the given repoRoot.
+func (s *Store) ReconcileInFlightAttempts(repoRoot string) error {
+	const crashMsg = "crash recovery: silicon restart"
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// Collect attempts that are running
+	rows, err := tx.Query(`SELECT id, task_id, role, status, COALESCE(finished_at, ''), COALESCE(error_summary, ''), artifacts_dir FROM attempts WHERE status = 'running'`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	type attemptInfo struct {
+		id           int64
+		taskID       string
+		role         string
+		status       string
+		finishedAt   string
+		errorSummary string
+		artifactsDir string
+	}
+	attempts := map[int64]attemptInfo{}
+	for rows.Next() {
+		var a attemptInfo
+		if err := rows.Scan(&a.id, &a.taskID, &a.role, &a.status, &a.finishedAt, &a.errorSummary, &a.artifactsDir); err != nil {
+			return err
+		}
+		attempts[a.id] = a
+	}
+
+	// Also collect attempts referenced by tasks.current_attempt_id
+	trows, err := tx.Query(`SELECT task_id, current_attempt_id FROM tasks WHERE current_attempt_id IS NOT NULL`)
+	if err != nil {
+		return err
+	}
+	defer trows.Close()
+	for trows.Next() {
+		var taskID string
+		var aid sql.NullInt64
+		if err := trows.Scan(&taskID, &aid); err != nil {
+			return err
+		}
+		if aid.Valid {
+			id := aid.Int64
+			if _, ok := attempts[id]; ok {
+				continue
+			}
+			// load attempt row
+			var a attemptInfo
+			row := tx.QueryRow(`SELECT id, task_id, role, status, COALESCE(finished_at, ''), COALESCE(error_summary, ''), artifacts_dir FROM attempts WHERE id = ?`, id)
+			if err := row.Scan(&a.id, &a.taskID, &a.role, &a.status, &a.finishedAt, &a.errorSummary, &a.artifactsDir); err != nil {
+				// if missing attempt, just clear the task reference
+				if errors.Is(err, sql.ErrNoRows) {
+					if _, err2 := tx.Exec(`UPDATE tasks SET current_attempt_id = NULL WHERE current_attempt_id = ?`, id); err2 != nil {
+						return err2
+					}
+					continue
+				}
+				return err
+			}
+			attempts[a.id] = a
+		}
+	}
+
+	// For each collected attempt, if not already reconciled, mark failed and
+	// clear task.current_attempt_id. Also write best-effort artifacts under
+	// repoRoot.
+	for _, a := range attempts {
+		// idempotency: if attempt already finished and errorSummary contains crashMsg, skip
+		if a.finishedAt != "" && strings.Contains(a.errorSummary, "crash recovery") {
+			continue
+		}
+
+		// update attempt status -> failed and clear task current_attempt_id
+		if _, err := tx.Exec(`UPDATE attempts SET status = ?, finished_at = ?, error_summary = ? WHERE id = ?`, "failed", time.Now().UTC().Format(time.RFC3339Nano), crashMsg, a.id); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`UPDATE tasks SET current_attempt_id = NULL WHERE current_attempt_id = ?`, a.id); err != nil {
+			return err
+		}
+
+		// Best-effort write artifacts
+		if a.artifactsDir != "" && repoRoot != "" {
+			fullDir := filepath.Join(repoRoot, a.artifactsDir)
+			_ = os.MkdirAll(fullDir, 0o755)
+			_ = os.WriteFile(filepath.Join(fullDir, "result.json"), []byte(`{"status":"failed","note":"crash recovery","role":"`+a.role+`"}`), 0o644)
+			// append or create log.txt with crash note
+			logPath := filepath.Join(fullDir, "log.txt")
+			existing := []byte{}
+			if b, err := os.ReadFile(logPath); err == nil {
+				existing = b
+			}
+			prefix := []byte("crash recovery: silicon restart\n")
+			_ = os.WriteFile(logPath, append(prefix, existing...), 0o644)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	return nil
 }

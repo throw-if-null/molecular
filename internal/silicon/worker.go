@@ -39,6 +39,14 @@ func StartLithiumWorker(ctx context.Context, s Store, repoRoot string, exe lithi
 				}
 				for _, t := range tasks {
 					if t.Phase == "lithium" && t.Status == "running" {
+						// check previous attempt for crash recovery note
+						crashNote := ""
+						if prev, perr := s.GetLatestAttemptByRole(t.TaskID, "lithium"); perr == nil {
+							if strings.Contains(prev.ErrorSummary, "crash recovery") {
+								crashNote = "previous run crashed; continue from artifacts\n"
+							}
+						}
+
 						// process one task: create an attempt, ensure worktree and write lithium artifacts
 						cfg := lithium.Config{
 							RepoRoot:      repoRoot,
@@ -77,7 +85,7 @@ func StartLithiumWorker(ctx context.Context, s Store, repoRoot string, exe lithi
 								_ = os.WriteFile(filepath.Join(fullDir, "meta.json"), mb, 0o644)
 							}
 							_ = os.WriteFile(filepath.Join(fullDir, "result.json"), []byte(`{"status":"failed","role":"lithium"}`), 0o644)
-							_ = os.WriteFile(filepath.Join(fullDir, "log.txt"), []byte(err.Error()+"\n"), 0o644)
+							_ = os.WriteFile(filepath.Join(fullDir, "log.txt"), []byte(crashNote+err.Error()+"\n"), 0o644)
 							_, _ = s.UpdateAttemptStatus(attemptID, "failed", err.Error())
 							updateTaskPhaseWithRetries(s, t.TaskID, "lithium", "failed")
 							continue
@@ -185,6 +193,13 @@ func StartCarbonWorker(ctx context.Context, s Store, repoRoot string, interval t
 				}
 				for _, t := range tasks {
 					if t.Phase == "carbon" && t.Status == "running" {
+						// check previous attempt for crash recovery note
+						crashNote := ""
+						if prev, perr := s.GetLatestAttemptByRole(t.TaskID, "carbon"); perr == nil {
+							if strings.Contains(prev.ErrorSummary, "crash recovery") {
+								crashNote = "previous run crashed; continue from artifacts\n"
+							}
+						}
 						// create attempt
 						attemptID, artifactsDir, attemptNum, startedAt, err := s.CreateAttempt(t.TaskID, "carbon")
 						if err != nil {
@@ -206,7 +221,7 @@ func StartCarbonWorker(ctx context.Context, s Store, repoRoot string, interval t
 							_ = os.WriteFile(filepath.Join(fullDir, "meta.json"), mb, 0o644)
 						}
 						_ = os.WriteFile(filepath.Join(fullDir, "result.json"), []byte(`{"summary":"stub","complexity":"unknown","role":"carbon","status":"running"}`), 0o644)
-						_ = os.WriteFile(filepath.Join(fullDir, "log.txt"), []byte("carbon stub run\n"), 0o644)
+						_ = os.WriteFile(filepath.Join(fullDir, "log.txt"), []byte(crashNote+"carbon stub run\n"), 0o644)
 						// simulate transient failure deterministically based on prompt
 						if strings.Contains(t.Prompt, "carbon-fail") {
 							newCount, err := s.UpdateAttemptStatus(attemptID, "failed", "transient failure")
@@ -258,6 +273,13 @@ func StartHeliumWorker(ctx context.Context, s Store, repoRoot string, interval t
 				}
 				for _, t := range tasks {
 					if t.Phase == "helium" && t.Status == "running" {
+						// check previous attempt for crash recovery note
+						crashNote := ""
+						if prev, perr := s.GetLatestAttemptByRole(t.TaskID, "helium"); perr == nil {
+							if strings.Contains(prev.ErrorSummary, "crash recovery") {
+								crashNote = "previous run crashed; continue from artifacts\n"
+							}
+						}
 						// create attempt
 						attemptID, artifactsDir, attemptNum, startedAt, err := s.CreateAttempt(t.TaskID, "helium")
 						if err != nil {
@@ -286,7 +308,7 @@ func StartHeliumWorker(ctx context.Context, s Store, repoRoot string, interval t
 								continue
 							}
 							_ = os.WriteFile(filepath.Join(fullDir, "result.json"), []byte(`{"status":"failed","role":"helium"}`), 0o644)
-							_ = os.WriteFile(filepath.Join(fullDir, "log.txt"), []byte("helium transient failure\n"), 0o644)
+							_ = os.WriteFile(filepath.Join(fullDir, "log.txt"), []byte(crashNote+"helium transient failure\n"), 0o644)
 							if newCount >= t.HeliumBudget {
 								updateTaskPhaseWithRetries(s, t.TaskID, "helium", "failed")
 							} else {
@@ -303,7 +325,7 @@ func StartHeliumWorker(ctx context.Context, s Store, repoRoot string, interval t
 								continue
 							}
 							_ = os.WriteFile(filepath.Join(fullDir, "result.json"), []byte(`{"status":"changes_requested","role":"helium"}`), 0o644)
-							_ = os.WriteFile(filepath.Join(fullDir, "log.txt"), []byte("helium requested changes\n"), 0o644)
+							_ = os.WriteFile(filepath.Join(fullDir, "log.txt"), []byte(crashNote+"helium requested changes\n"), 0o644)
 							_, _ = s.UpdateAttemptStatus(attemptID, "ok", "changes requested")
 							if newCount > t.ReviewBudget {
 								// exceeded review budget -> fail
@@ -316,7 +338,7 @@ func StartHeliumWorker(ctx context.Context, s Store, repoRoot string, interval t
 						}
 						// otherwise approved
 						_ = os.WriteFile(filepath.Join(fullDir, "result.json"), []byte(`{"status":"approved","role":"helium"}`), 0o644)
-						_ = os.WriteFile(filepath.Join(fullDir, "log.txt"), []byte("helium stub run\n"), 0o644)
+						_ = os.WriteFile(filepath.Join(fullDir, "log.txt"), []byte(crashNote+"helium stub run\n"), 0o644)
 						// mark attempt ok
 						_, _ = s.UpdateAttemptStatus(attemptID, "ok", "")
 						// transition task to chlorine (keep status running)
@@ -354,6 +376,13 @@ func StartChlorineWorker(ctx context.Context, s Store, repoRoot string, interval
 				}
 				for _, t := range tasks {
 					if t.Phase == "chlorine" && t.Status == "running" {
+						// check previous attempt for crash recovery note
+						crashNote := ""
+						if prev, perr := s.GetLatestAttemptByRole(t.TaskID, "chlorine"); perr == nil {
+							if strings.Contains(prev.ErrorSummary, "crash recovery") {
+								crashNote = "previous run crashed; continue from artifacts\n"
+							}
+						}
 						// create attempt
 						attemptID, artifactsDir, attemptNum, startedAt, err := s.CreateAttempt(t.TaskID, "chlorine")
 						if err != nil {
@@ -390,7 +419,7 @@ func StartChlorineWorker(ctx context.Context, s Store, repoRoot string, interval
 							}
 						}
 						_ = os.WriteFile(filepath.Join(fullDir, "result.json"), []byte(`{"status":"completed","note":"stub","role":"chlorine"}`), 0o644)
-						_ = os.WriteFile(filepath.Join(fullDir, "log.txt"), []byte("chlorine stub run\n"+hookOut), 0o644)
+						_ = os.WriteFile(filepath.Join(fullDir, "log.txt"), []byte(crashNote+"chlorine stub run\n"+hookOut), 0o644)
 						if hookErr != nil {
 							_, _ = s.UpdateAttemptStatus(attemptID, "failed", hookErr.Error())
 							updateTaskPhaseWithRetries(s, t.TaskID, "chlorine", "failed")
