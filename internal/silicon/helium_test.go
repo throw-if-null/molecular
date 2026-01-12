@@ -67,8 +67,8 @@ func TestHeliumWorker_creates_attempt_and_transitions(t *testing.T) {
 
 	// check artifacts files exist
 	fullDir := filepath.Join(td, artifactsDir)
-	if _, err := os.Stat(filepath.Join(fullDir, "helium_result.json")); err != nil {
-		t.Fatalf("missing helium_result.json: %v", err)
+	if _, err := os.Stat(filepath.Join(fullDir, "result.json")); err != nil {
+		t.Fatalf("missing result.json: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(fullDir, "log.txt")); err != nil {
 		t.Fatalf("missing log.txt: %v", err)

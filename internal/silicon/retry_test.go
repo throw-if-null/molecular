@@ -174,8 +174,8 @@ func TestRetrySemantics_ReviewLoop(t *testing.T) {
 				if rows.Next() {
 					_ = rows.Scan(&artifactsDir)
 					full := filepath.Join(td, artifactsDir)
-					if _, err := os.Stat(filepath.Join(full, "helium_result.json")); err != nil {
-						t.Fatalf("helium_result.json missing: %v", err)
+					if _, err := os.Stat(filepath.Join(full, "result.json")); err != nil {
+						t.Fatalf("result.json missing: %v", err)
 					}
 					rows.Close()
 					return

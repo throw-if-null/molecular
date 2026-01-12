@@ -70,8 +70,8 @@ func TestChlorineWorker_creates_attempt_and_transitions(t *testing.T) {
 
 	// check artifacts files exist
 	fullDir := filepath.Join(td, artifactsDir)
-	if _, err := os.Stat(filepath.Join(fullDir, "final_summary.json")); err != nil {
-		t.Fatalf("missing final_summary.json: %v", err)
+	if _, err := os.Stat(filepath.Join(fullDir, "result.json")); err != nil {
+		t.Fatalf("missing result.json: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(fullDir, "log.txt")); err != nil {
 		t.Fatalf("missing log.txt: %v", err)
