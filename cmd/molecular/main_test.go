@@ -115,8 +115,8 @@ func TestListCancelLogsCleanup(t *testing.T) {
 		t.Fatalf("cancel exit code: %d", code)
 	}
 	b, _ = io.ReadAll(buf)
-	var cres2 map[string]interface{}
-	if err := json.Unmarshal(b, &cres2); err != nil {
+	var cres map[string]interface{}
+	if err := json.Unmarshal(b, &cres); err != nil {
 		t.Fatalf("unmarshal cancel: %v; body=%s", err, string(b))
 	}
 	if cres["canceled"] != true {
