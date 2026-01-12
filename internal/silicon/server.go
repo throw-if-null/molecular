@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/throw-if-null/molecular/internal/api"
+	"github.com/throw-if-null/molecular/internal/paths"
 	"github.com/throw-if-null/molecular/internal/store"
 )
 
