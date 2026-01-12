@@ -328,6 +328,7 @@ func (s *Store) UpdateAttemptStatus(attemptID int64, status, errorSummary string
 			lastErr = err
 			// if begin failed due to busy, backoff and retry
 			if isSqliteBusy(err) {
+				log.Printf("UpdateAttemptStatus: Begin failed (busy), retry %d: %v", i, err)
 				time.Sleep(time.Duration(10*(1<<i)) * time.Millisecond)
 				continue
 			}
