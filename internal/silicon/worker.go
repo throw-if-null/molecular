@@ -351,8 +351,30 @@ func StartChlorineWorker(ctx context.Context, s Store, repoRoot string, interval
 						if mb, err := json.Marshal(meta); err == nil {
 							_ = os.WriteFile(filepath.Join(fullDir, "meta.json"), mb, 0o644)
 						}
+						// run optional chlorine hook
+						hookOut := ""
+						hookErr := error(nil)
+						hookPath := filepath.Join(repoRoot, ".molecular", "chlorine.sh")
+						if fi, err := os.Stat(hookPath); err == nil {
+							if runtime.GOOS == "windows" {
+								hookOut = "skipped chlorine.sh on windows\n"
+							} else if fi.Mode()&0111 == 0 {
+								hookOut = "chlorine.sh exists but not executable, skipping\n"
+							} else {
+								cmd := exec.CommandContext(ctx, hookPath)
+								cmd.Dir = fullDir
+								out, err := cmd.CombinedOutput()
+								hookOut = string(out)
+								hookErr = err
+							}
+						}
 						_ = os.WriteFile(filepath.Join(fullDir, "result.json"), []byte(`{"status":"completed","note":"stub","role":"chlorine"}`), 0o644)
-						_ = os.WriteFile(filepath.Join(fullDir, "log.txt"), []byte("chlorine stub run\n"), 0o644)
+						_ = os.WriteFile(filepath.Join(fullDir, "log.txt"), []byte("chlorine stub run\n"+hookOut), 0o644)
+						if hookErr != nil {
+							_ = s.UpdateAttemptStatus(attemptID, "failed", hookErr.Error())
+							_ = s.UpdateTaskPhaseAndStatus(t.TaskID, "chlorine", "failed")
+							continue
+						}
 						// mark attempt ok
 						_ = s.UpdateAttemptStatus(attemptID, "ok", "")
 						// transition task to terminal state
