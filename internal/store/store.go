@@ -391,6 +391,37 @@ func (s *Store) UpdateAttemptStatus(attemptID int64, status, errorSummary string
 				}
 			}
 
+			// If we've incremented role-specific retries, and the new count meets
+			// or exceeds the per-task budget, mark the task failed atomically in
+			// this same transaction to avoid races where workers leave the task
+			// stuck in 'running'. This keeps the status update consistent with
+			// the retry counter increment.
+			if status == "failed" {
+				switch role {
+				case "helium":
+					var budget int
+					if err := tx.QueryRow(`SELECT helium_budget FROM tasks WHERE task_id = ?`, taskID).Scan(&budget); err == nil {
+						if newCount >= budget {
+							if _, err := tx.Exec(`UPDATE tasks SET phase = ?, status = ?, updated_at = ? WHERE task_id = ?`, "helium", "failed", time.Now().UTC().Format(time.RFC3339Nano), taskID); err != nil {
+								lastErr = err
+								return
+							}
+						}
+					}
+				case "carbon":
+					var budget int
+					if err := tx.QueryRow(`SELECT carbon_budget FROM tasks WHERE task_id = ?`, taskID).Scan(&budget); err == nil {
+						if newCount >= budget {
+							if _, err := tx.Exec(`UPDATE tasks SET phase = ?, status = ?, updated_at = ? WHERE task_id = ?`, "carbon", "failed", time.Now().UTC().Format(time.RFC3339Nano), taskID); err != nil {
+								lastErr = err
+								return
+							}
+						}
+					}
+				default:
+				}
+			}
+
 			if _, err := tx.Exec(`UPDATE attempts SET status = ?, finished_at = ?, error_summary = ? WHERE id = ?`, status, time.Now().UTC().Format(time.RFC3339Nano), errorSummary, attemptID); err != nil {
 				lastErr = err
 				return
