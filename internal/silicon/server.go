@@ -15,7 +15,7 @@ import (
 )
 
 type Server struct {
-	store Store
+	store        Store
 	carbonBudget int
 	heliumBudget int
 	reviewBudget int
