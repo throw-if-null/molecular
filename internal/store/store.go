@@ -230,128 +230,48 @@ func (s *Store) String() string {
 }
 
 // CreateAttempt creates a new attempt row for the given task and role.
-// Returns the inserted attempt id and the artifacts_dir (relative path).
-func (s *Store) CreateAttempt(taskID, role string) (int64, string, error) {
+// Returns the inserted attempt id, artifacts_dir (relative path), attempt_num and started_at.
+func (s *Store) CreateAttempt(taskID, role string) (int64, string, int64, string, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
-		return 0, "", err
+		return 0, "", 0, "", err
 	}
 	defer func() { _ = tx.Rollback() }()
 
 	// compute next attempt_num
 	var maxNum sql.NullInt64
 	if err := tx.QueryRow(`SELECT MAX(attempt_num) FROM attempts WHERE task_id = ? AND role = ?`, taskID, role).Scan(&maxNum); err != nil {
-		return 0, "", err
+		return 0, "", 0, "", err
 	}
 	next := int64(1)
 	if maxNum.Valid {
 		next = maxNum.Int64 + 1
 	}
 
-	// artifacts dir normalized as .molecular/runs/<task_id>/<role>/<attempt_id> (we don't know id yet, so use a temporary placeholder and update after insert)
 	// insert with empty artifacts_dir first
-	res, err := tx.Exec(`INSERT INTO attempts (task_id, role, attempt_num, status, started_at, artifacts_dir) VALUES (?, ?, ?, ?, ?, ?)`, taskID, role, next, "running", time.Now().UTC().Format(time.RFC3339Nano), "")
+	startedAt := time.Now().UTC().Format(time.RFC3339Nano)
+	res, err := tx.Exec(`INSERT INTO attempts (task_id, role, attempt_num, status, started_at, artifacts_dir) VALUES (?, ?, ?, ?, ?, ?)`, taskID, role, next, "running", startedAt, "")
 	if err != nil {
-		return 0, "", err
+		return 0, "", 0, "", err
 	}
 	id, err := res.LastInsertId()
 	if err != nil {
-		return 0, "", err
+		return 0, "", 0, "", err
 	}
 
-	artifactsDir := filepath.ToSlash(filepath.Join(".molecular", "runs", taskID, role, fmt.Sprintf("%d", id)))
+	// new layout: attempts are stored under .molecular/runs/<task_id>/attempts/<attempt_id>
+	artifactsDir := filepath.ToSlash(filepath.Join(".molecular", "runs", taskID, "attempts", fmt.Sprintf("%d", id)))
 
 	if _, err := tx.Exec(`UPDATE attempts SET artifacts_dir = ? WHERE id = ?`, artifactsDir, id); err != nil {
-		return 0, "", err
+		return 0, "", 0, "", err
 	}
 
 	if _, err := tx.Exec(`UPDATE tasks SET current_attempt_id = ? WHERE task_id = ?`, id, taskID); err != nil {
-		return 0, "", err
+		return 0, "", 0, "", err
 	}
 
 	if err := tx.Commit(); err != nil {
-		return 0, "", err
+		return 0, "", 0, "", err
 	}
-	return id, artifactsDir, nil
-}
-
-// UpdateAttemptStatus updates an attempt's status, finished_at and error_summary.
-// It also clears the task's current_attempt_id when finishing.
-func (s *Store) UpdateAttemptStatus(attemptID int64, status, errorSummary string) error {
-	tx, err := s.db.Begin()
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	if _, err := tx.Exec(`UPDATE attempts SET status = ?, finished_at = ?, error_summary = ? WHERE id = ?`, status, time.Now().UTC().Format(time.RFC3339Nano), errorSummary, attemptID); err != nil {
-		return err
-	}
-
-	// clear current_attempt_id on tasks if it matches this attempt
-	if _, err := tx.Exec(`UPDATE tasks SET current_attempt_id = NULL WHERE current_attempt_id = ?`, attemptID); err != nil {
-		return err
-	}
-
-	return tx.Commit()
-}
-
-// IncrementCarbonRetries atomically increments carbon_retries and returns the new value.
-func (s *Store) IncrementCarbonRetries(taskID string) (int, error) {
-	tx, err := s.db.Begin()
-	if err != nil {
-		return 0, err
-	}
-	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.Exec(`UPDATE tasks SET carbon_retries = carbon_retries + 1, updated_at = ? WHERE task_id = ?`, time.Now().UTC().Format(time.RFC3339Nano), taskID); err != nil {
-		return 0, err
-	}
-	var v int
-	if err := tx.QueryRow(`SELECT carbon_retries FROM tasks WHERE task_id = ?`, taskID).Scan(&v); err != nil {
-		return 0, err
-	}
-	if err := tx.Commit(); err != nil {
-		return 0, err
-	}
-	return v, nil
-}
-
-// IncrementHeliumRetries atomically increments helium_retries and returns the new value.
-func (s *Store) IncrementHeliumRetries(taskID string) (int, error) {
-	tx, err := s.db.Begin()
-	if err != nil {
-		return 0, err
-	}
-	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.Exec(`UPDATE tasks SET helium_retries = helium_retries + 1, updated_at = ? WHERE task_id = ?`, time.Now().UTC().Format(time.RFC3339Nano), taskID); err != nil {
-		return 0, err
-	}
-	var v int
-	if err := tx.QueryRow(`SELECT helium_retries FROM tasks WHERE task_id = ?`, taskID).Scan(&v); err != nil {
-		return 0, err
-	}
-	if err := tx.Commit(); err != nil {
-		return 0, err
-	}
-	return v, nil
-}
-
-// IncrementReviewRetries atomically increments review_retries and returns the new value.
-func (s *Store) IncrementReviewRetries(taskID string) (int, error) {
-	tx, err := s.db.Begin()
-	if err != nil {
-		return 0, err
-	}
-	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.Exec(`UPDATE tasks SET review_retries = review_retries + 1, updated_at = ? WHERE task_id = ?`, time.Now().UTC().Format(time.RFC3339Nano), taskID); err != nil {
-		return 0, err
-	}
-	var v int
-	if err := tx.QueryRow(`SELECT review_retries FROM tasks WHERE task_id = ?`, taskID).Scan(&v); err != nil {
-		return 0, err
-	}
-	if err := tx.Commit(); err != nil {
-		return 0, err
-	}
-	return v, nil
+	return id, artifactsDir, next, startedAt, nil
 }
