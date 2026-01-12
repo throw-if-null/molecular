@@ -78,6 +78,11 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := paths.ValidateTaskID(req.TaskID); err != nil {
+		http.Error(w, "invalid task_id", http.StatusBadRequest)
+		return
+	}
+
 	task, existed, err := s.store.CreateTaskWithBudgets(&req, s.carbonBudget, s.heliumBudget, s.reviewBudget)
 	if err != nil {
 		http.Error(w, "failed to create task", http.StatusInternalServerError)
