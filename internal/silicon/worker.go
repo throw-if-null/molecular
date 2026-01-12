@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/throw-if-null/molecular/internal/lithium"
+	"github.com/throw-if-null/molecular/internal/paths"
 	"github.com/throw-if-null/molecular/internal/store"
 )
 
@@ -79,7 +80,13 @@ func StartLithiumWorker(ctx context.Context, s Store, repoRoot string, exe lithi
 						defer UnregisterAttemptCanceler(t.TaskID)
 						defer attemptCancel()
 
-						fullDir := filepath.Join(repoRoot, artifactsDir)
+						fullDir, ferr := paths.SafeJoin(repoRoot, artifactsDir)
+						if ferr != nil {
+							// skip attempt if path unsafe
+							_, _ = s.UpdateAttemptStatus(attemptID, "failed", ferr.Error())
+							updateTaskPhaseWithRetries(s, t.TaskID, "lithium", "failed")
+							return
+						}
 						_ = os.MkdirAll(fullDir, 0o755)
 
 						wtPath, err := r.EnsureWorktree(attemptCtx)
