@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -36,6 +37,10 @@ func TestRetrySemantics_CarbonTransient(t *testing.T) {
 	for time.Now().Before(deadline) {
 		task, err := s.GetTask(taskID)
 		if err != nil {
+			if strings.Contains(err.Error(), "database is locked") {
+				time.Sleep(10 * time.Millisecond)
+				continue
+			}
 			t.Fatalf("get task: %v", err)
 		}
 		if task.Status == "failed" {
@@ -83,6 +88,10 @@ func TestRetrySemantics_HeliumTransient(t *testing.T) {
 	for time.Now().Before(deadline) {
 		task, err := s.GetTask(taskID)
 		if err != nil {
+			if strings.Contains(err.Error(), "database is locked") {
+				time.Sleep(10 * time.Millisecond)
+				continue
+			}
 			t.Fatalf("get task: %v", err)
 		}
 		if task.Status == "failed" {
@@ -131,6 +140,10 @@ func TestRetrySemantics_ReviewLoop(t *testing.T) {
 	for time.Now().Before(deadline) {
 		task, err := s.GetTask(taskID)
 		if err != nil {
+			if strings.Contains(err.Error(), "database is locked") {
+				time.Sleep(10 * time.Millisecond)
+				continue
+			}
 			t.Fatalf("get task: %v", err)
 		}
 		// if helium wrote changes_requested artifact, it will have been an attempt; check review_retries
