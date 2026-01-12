@@ -2,7 +2,6 @@ package silicon_test
 
 import (
 	"context"
-	"database/sql"
 	"os"
 	"path/filepath"
 	"testing"
