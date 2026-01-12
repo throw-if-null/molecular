@@ -115,8 +115,8 @@ func TestListCancelLogsCleanup(t *testing.T) {
 		t.Fatalf("cancel exit code: %d", code)
 	}
 	b, _ = io.ReadAll(buf)
-	var cres map[string]interface{}
-	if err := json.Unmarshal(b, &cres); err != nil {
+	var cres2 map[string]interface{}
+	if err := json.Unmarshal(b, &cres2); err != nil {
 		t.Fatalf("unmarshal cancel: %v; body=%s", err, string(b))
 	}
 	if cres["canceled"] != true {
@@ -149,11 +149,11 @@ func TestListCancelLogsCleanup(t *testing.T) {
 		t.Fatalf("cleanup exit code: %d", code)
 	}
 	b, _ = io.ReadAll(buf)
-	var cres map[string]interface{}
-	if err := json.Unmarshal(b, &cres); err != nil {
+	var cres2 map[string]interface{}
+	if err := json.Unmarshal(b, &cres2); err != nil {
 		t.Fatalf("unmarshal cleanup: %v; body=%s", err, string(b))
 	}
-	if cres["artifacts"] != true || cres["worktree"] != true {
+	if cres2["artifacts"] != true || cres2["worktree"] != true {
 		t.Fatalf("unexpected cleanup body: %v", cres)
 	}
 }
