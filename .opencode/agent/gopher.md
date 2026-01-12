@@ -2,7 +2,8 @@
 description: "Go implementation subagent: writes Go code + tests, runs go test, minimal diffs."
 model: "github-copilot/gpt-5-mini"
 mode: subagent
-reasoningEffort: medium
+reasoningEffort: high
+verbosity: high
 temperature: 0.2
 prompt: prompts/gopher.prompt.md
 permission:
