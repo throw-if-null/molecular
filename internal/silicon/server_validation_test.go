@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"testing"
 
@@ -57,7 +58,8 @@ func TestLogsRejectsInvalidTaskID(t *testing.T) {
 
 	bad := []string{"../x", "..\\x", "a/b", "a\\b", "/abs", "C:\\x"}
 	for _, id := range bad {
-		res, err := http.Get(ts.URL + "/v1/tasks/" + id + "/logs")
+		esc := url.PathEscape(id)
+		res, err := http.Get(ts.URL + "/v1/tasks/" + esc + "/logs")
 		if err != nil {
 			t.Fatalf("get err: %v", err)
 		}
