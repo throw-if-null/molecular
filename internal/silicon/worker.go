@@ -201,3 +201,51 @@ func StartHeliumWorker(ctx context.Context, s Store, repoRoot string, interval t
 	}()
 	return cancel
 }
+
+
+// StartChlorineWorker starts a background goroutine that polls for tasks in phase 'chlorine'
+// and runs a stubbed chlorine finisher. It creates attempt records and writes
+// placeholder artifacts (`final_summary.json`, `log.txt`) under the attempt artifacts dir.
+// After a successful stub run the task is transitioned to a terminal state
+// (phase 'done', status 'completed'). The worker is idempotent: it only acts on
+// tasks with status 'running'.
+func StartChlorineWorker(ctx context.Context, s Store, repoRoot string, interval time.Duration) context.CancelFunc {
+	ctx, cancel := context.WithCancel(ctx)
+	go func() {
+		if interval <= 0 {
+			interval = 1 * time.Second
+		}
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				tasks, err := s.ListTasks(0)
+				if err != nil {
+					continue
+				}
+				for _, t := range tasks {
+					if t.Phase == "chlorine" && t.Status == "running" {
+						// create attempt
+						attemptID, artifactsDir, err := s.CreateAttempt(t.TaskID, "chlorine")
+						if err != nil {
+							continue
+						}
+						fullDir := filepath.Join(repoRoot, artifactsDir)
+						_ = os.MkdirAll(fullDir, 0o755)
+						// write final summary and log
+						_ = os.WriteFile(filepath.Join(fullDir, "final_summary.json"), []byte(`{"status":"completed","note":"stub"}`), 0o644)
+						_ = os.WriteFile(filepath.Join(fullDir, "log.txt"), []byte("chlorine stub run\n"), 0o644)
+						// mark attempt ok
+						_ = s.UpdateAttemptStatus(attemptID, "ok", "")
+						// transition task to terminal state
+						_ = s.UpdateTaskPhaseAndStatus(t.TaskID, "done", "completed")
+					}
+				}
+			}
+		}
+	}()
+	return cancel
+}
