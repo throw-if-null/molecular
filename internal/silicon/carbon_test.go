@@ -54,7 +54,7 @@ func TestCarbonWorker_creates_attempt_and_transitions(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cancelFn := silicon.StartCarbonWorker(ctx, s, td)
+	cancelFn := silicon.StartCarbonWorker(ctx, s, td, 10*time.Millisecond)
 	defer cancelFn()
 
 	// wait for worker to do its job
