@@ -56,7 +56,12 @@ func setupServer() *httptest.Server {
 	})
 
 	mux.HandleFunc("/v1/tasks/task-1/cleanup", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(404)
+		if r.Method == "POST" {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"artifacts":true,"worktree":true}`))
+			return
+		}
+		w.WriteHeader(405)
 	})
 
 	return httptest.NewServer(mux)
