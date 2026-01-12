@@ -20,7 +20,7 @@ type Store interface {
 	CancelTask(taskID string) (bool, error)
 	UpdateTaskPhaseAndStatus(taskID, phase, status string) error
 	// Attempt management for workers
-	CreateAttempt(taskID, role string) (int64, string, error)
+	CreateAttempt(taskID, role string) (int64, string, int64, string, error)
 	UpdateAttemptStatus(attemptID int64, status, errorSummary string) error
 	// Retry counters
 	IncrementCarbonRetries(taskID string) (int, error)
