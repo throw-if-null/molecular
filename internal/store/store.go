@@ -258,21 +258,32 @@ func (s *Store) CreateAttempt(taskID, role string) (int64, string, int64, string
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	// ensure no current_attempt_id is set for this task
-	var current sql.NullInt64
-	if err := tx.QueryRow(`SELECT current_attempt_id FROM tasks WHERE task_id = ?`, taskID).Scan(&current); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return 0, "", 0, "", ErrNotFound
-		}
+	// atomically claim the task by writing a sentinel (-1) into current_attempt_id
+	res, err := tx.Exec(`UPDATE tasks SET current_attempt_id = -1 WHERE task_id = ? AND current_attempt_id IS NULL`, taskID)
+	if err != nil {
 		return 0, "", 0, "", err
 	}
-	if current.Valid {
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, "", 0, "", err
+	}
+	if n == 0 {
+		// task either does not exist or is already claimed
+		var exists int
+		if err := tx.QueryRow(`SELECT 1 FROM tasks WHERE task_id = ?`, taskID).Scan(&exists); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return 0, "", 0, "", ErrNotFound
+			}
+			return 0, "", 0, "", err
+		}
 		return 0, "", 0, "", ErrInProgress
 	}
 
 	// compute next attempt_num
 	var maxNum sql.NullInt64
 	if err := tx.QueryRow(`SELECT MAX(attempt_num) FROM attempts WHERE task_id = ? AND role = ?`, taskID, role).Scan(&maxNum); err != nil {
+		// release claim
+		_ = tx.Rollback()
 		return 0, "", 0, "", err
 	}
 	next := int64(1)
@@ -282,12 +293,15 @@ func (s *Store) CreateAttempt(taskID, role string) (int64, string, int64, string
 
 	// insert with empty artifacts_dir first
 	startedAt := time.Now().UTC().Format(time.RFC3339Nano)
-	res, err := tx.Exec(`INSERT INTO attempts (task_id, role, attempt_num, status, started_at, artifacts_dir) VALUES (?, ?, ?, ?, ?, ?)`, taskID, role, next, "running", startedAt, "")
+	res2, err := tx.Exec(`INSERT INTO attempts (task_id, role, attempt_num, status, started_at, artifacts_dir) VALUES (?, ?, ?, ?, ?, ?)`, taskID, role, next, "running", startedAt, "")
 	if err != nil {
+		// release claim
+		_ = tx.Rollback()
 		return 0, "", 0, "", err
 	}
-	id, err := res.LastInsertId()
+	id, err := res2.LastInsertId()
 	if err != nil {
+		_ = tx.Rollback()
 		return 0, "", 0, "", err
 	}
 
@@ -295,11 +309,13 @@ func (s *Store) CreateAttempt(taskID, role string) (int64, string, int64, string
 	artifactsDir := filepath.ToSlash(filepath.Join(".molecular", "runs", taskID, "attempts", fmt.Sprintf("%d", id)))
 
 	if _, err := tx.Exec(`UPDATE attempts SET artifacts_dir = ? WHERE id = ?`, artifactsDir, id); err != nil {
+		_ = tx.Rollback()
 		return 0, "", 0, "", err
 	}
 
-	// set current_attempt_id only if still null (defensive)
-	if _, err := tx.Exec(`UPDATE tasks SET current_attempt_id = ? WHERE task_id = ? AND current_attempt_id IS NULL`, id, taskID); err != nil {
+	// replace sentinel with real attempt id
+	if _, err := tx.Exec(`UPDATE tasks SET current_attempt_id = ? WHERE task_id = ? AND current_attempt_id = -1`, id, taskID); err != nil {
+		_ = tx.Rollback()
 		return 0, "", 0, "", err
 	}
 
