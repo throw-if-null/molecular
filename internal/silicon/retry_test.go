@@ -118,6 +118,8 @@ func TestRetrySemantics_HeliumTransient(t *testing.T) {
 			t.Fatalf("count helium attempts: %v", err)
 		}
 
+		t.Logf("helium_retries=%d attempts=%d phase=%s status=%s", hr, attempts, task.Phase, task.Status)
+
 		// Success condition: helium_retries has reached (or exceeded) the
 		// configured HeliumBudget and the attempts table has at least as many
 		// rows as retries. This avoids flaky timing around the task.Status
