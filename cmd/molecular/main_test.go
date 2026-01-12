@@ -1,0 +1,181 @@
+package main
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"testing"
+
+	"github.com/throw-if-null/molecular/internal/api"
+)
+
+func setupServer() *httptest.Server {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/tasks", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" {
+			limit := r.URL.Query().Get("limit")
+			var tasks []api.Task
+			for i := 1; i <= 3; i++ {
+				tasks = append(tasks, api.Task{TaskID: fmt.Sprintf("task-%d", i)})
+			}
+			if limit == "2" {
+				tasks = tasks[:2]
+			}
+			_ = json.NewEncoder(w).Encode(tasks)
+			return
+		}
+		if r.Method == "POST" {
+			// create
+			w.WriteHeader(200)
+			w.Write([]byte(`{"ok":true}`))
+			return
+		}
+		w.WriteHeader(405)
+	})
+
+	mux.HandleFunc("/v1/tasks/task-1/cancel", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "POST" {
+			w.Write([]byte(`{"canceled":true}`))
+			return
+		}
+		w.WriteHeader(405)
+	})
+
+	mux.HandleFunc("/v1/tasks/task-1/logs", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" {
+			w.Write([]byte(`{"artifacts_root":"/tmp/x"}`))
+			return
+		}
+		w.WriteHeader(405)
+	})
+
+	mux.HandleFunc("/v1/tasks/task-1/cleanup", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(404)
+	})
+
+	return httptest.NewServer(mux)
+}
+
+func TestListCancelLogsCleanup(t *testing.T) {
+	ts := setupServer()
+	defer ts.Close()
+
+	client := &http.Client{}
+
+	// list
+	buf := &bytes.Buffer{}
+	oldOut, wout := captureStdout(buf)
+	code := run([]string{"list"}, client, ts.URL, buf, bytes.NewBuffer(nil))
+	restoreStdout(oldOut, wout)
+	if code != 0 {
+		t.Fatalf("list exit code: %d", code)
+	}
+	b, _ := io.ReadAll(buf)
+	var tasks []map[string]interface{}
+	if err := json.Unmarshal(b, &tasks); err != nil {
+		t.Fatalf("unmarshal list: %v; body=%s", err, string(b))
+	}
+	if len(tasks) != 3 {
+		t.Fatalf("expected 3 tasks, got %d", len(tasks))
+	}
+
+	// list --limit 2
+	buf.Reset()
+	oldOut, wout = captureStdout(buf)
+	code = run([]string{"list", "--limit", "2"}, client, ts.URL, buf, bytes.NewBuffer(nil))
+	restoreStdout(oldOut, wout)
+	if code != 0 {
+		t.Fatalf("list limit exit code: %d", code)
+	}
+	b, _ = io.ReadAll(buf)
+	if err := json.Unmarshal(b, &tasks); err != nil {
+		t.Fatalf("unmarshal list limit: %v; body=%s", err, string(b))
+	}
+	if len(tasks) != 2 {
+		t.Fatalf("expected 2 tasks, got %d", len(tasks))
+	}
+
+	// cancel
+	buf.Reset()
+	oldOut, wout = captureStdout(buf)
+	code = run([]string{"cancel", "task-1"}, client, ts.URL, buf, bytes.NewBuffer(nil))
+	restoreStdout(oldOut, wout)
+	if code != 0 {
+		t.Fatalf("cancel exit code: %d", code)
+	}
+	b, _ = io.ReadAll(buf)
+	var cres map[string]interface{}
+	if err := json.Unmarshal(b, &cres); err != nil {
+		t.Fatalf("unmarshal cancel: %v; body=%s", err, string(b))
+	}
+	if cres["canceled"] != true {
+		t.Fatalf("unexpected cancel body: %v", cres)
+	}
+
+	// logs
+	buf.Reset()
+	oldOut, wout = captureStdout(buf)
+	code = run([]string{"logs", "task-1"}, client, ts.URL, buf, bytes.NewBuffer(nil))
+	restoreStdout(oldOut, wout)
+	if code != 0 {
+		t.Fatalf("logs exit code: %d", code)
+	}
+	b, _ = io.ReadAll(buf)
+	var lres map[string]interface{}
+	if err := json.Unmarshal(b, &lres); err != nil {
+		t.Fatalf("unmarshal logs: %v; body=%s", err, string(b))
+	}
+	if _, ok := lres["artifacts_root"]; !ok {
+		t.Fatalf("missing artifacts_root in logs")
+	}
+
+	// cleanup -> not implemented should return code 2 and print message to stderr
+	// capture stderr
+	serr := &bytes.Buffer{}
+	oldErr, werr := captureStderr(serr)
+	code = run([]string{"cleanup", "task-1"}, client, ts.URL, bytes.NewBuffer(nil), serr)
+	restoreStderr(oldErr, werr)
+	if code != 2 {
+		t.Fatalf("cleanup exit code: %d", code)
+	}
+	if !bytes.Contains(serr.Bytes(), []byte("cleanup not implemented")) {
+		t.Fatalf("expected cleanup not implemented message, got: %s", serr.String())
+	}
+}
+
+// helpers to capture stdout/stderr
+func captureStdout(w *bytes.Buffer) (*os.File, *os.File) {
+	old := os.Stdout
+	r, wpipe, _ := os.Pipe()
+	os.Stdout = wpipe
+	go func() {
+		io.Copy(w, r)
+		r.Close()
+	}()
+	return old, wpipe
+}
+
+func restoreStdout(old *os.File, wpipe *os.File) {
+	_ = wpipe.Close()
+	os.Stdout = old
+}
+
+func captureStderr(w *bytes.Buffer) (*os.File, *os.File) {
+	old := os.Stderr
+	r, wpipe, _ := os.Pipe()
+	os.Stderr = wpipe
+	go func() {
+		io.Copy(w, r)
+		r.Close()
+	}()
+	return old, wpipe
+}
+
+func restoreStderr(old *os.File, wpipe *os.File) {
+	_ = wpipe.Close()
+	os.Stderr = old
+}
