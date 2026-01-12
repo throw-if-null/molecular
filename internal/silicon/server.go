@@ -30,6 +30,7 @@ type Store interface {
 	GetTask(taskID string) (*api.Task, error)
 	ListTasks(limit int) ([]*api.Task, error)
 	CancelTask(taskID string) (bool, error)
+	IsTaskCancelled(taskID string) (bool, error)
 	UpdateTaskPhaseAndStatus(taskID, phase, status string) error
 
 	// Attempt management for workers
@@ -145,6 +146,8 @@ func (s *Server) handleCancelTask(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "failed to cancel task", http.StatusInternalServerError)
 		return
 	}
+	// signal any in-memory running attempt for this task so workers can stop
+	_ = CancelInMemory(taskID)
 	if changed {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("cancelled"))
