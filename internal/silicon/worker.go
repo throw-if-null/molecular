@@ -202,7 +202,6 @@ func StartHeliumWorker(ctx context.Context, s Store, repoRoot string, interval t
 	return cancel
 }
 
-
 // StartChlorineWorker starts a background goroutine that polls for tasks in phase 'chlorine'
 // and runs a stubbed chlorine finisher. It creates attempt records and writes
 // placeholder artifacts (`final_summary.json`, `log.txt`) under the attempt artifacts dir.
