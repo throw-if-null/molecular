@@ -295,3 +295,63 @@ func (s *Store) UpdateAttemptStatus(attemptID int64, status, errorSummary string
 
 	return tx.Commit()
 }
+
+// IncrementCarbonRetries atomically increments carbon_retries and returns the new value.
+func (s *Store) IncrementCarbonRetries(taskID string) (int, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.Exec(`UPDATE tasks SET carbon_retries = carbon_retries + 1, updated_at = ? WHERE task_id = ?`, time.Now().UTC().Format(time.RFC3339Nano), taskID); err != nil {
+		return 0, err
+	}
+	var v int
+	if err := tx.QueryRow(`SELECT carbon_retries FROM tasks WHERE task_id = ?`, taskID).Scan(&v); err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return v, nil
+}
+
+// IncrementHeliumRetries atomically increments helium_retries and returns the new value.
+func (s *Store) IncrementHeliumRetries(taskID string) (int, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.Exec(`UPDATE tasks SET helium_retries = helium_retries + 1, updated_at = ? WHERE task_id = ?`, time.Now().UTC().Format(time.RFC3339Nano), taskID); err != nil {
+		return 0, err
+	}
+	var v int
+	if err := tx.QueryRow(`SELECT helium_retries FROM tasks WHERE task_id = ?`, taskID).Scan(&v); err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return v, nil
+}
+
+// IncrementReviewRetries atomically increments review_retries and returns the new value.
+func (s *Store) IncrementReviewRetries(taskID string) (int, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.Exec(`UPDATE tasks SET review_retries = review_retries + 1, updated_at = ? WHERE task_id = ?`, time.Now().UTC().Format(time.RFC3339Nano), taskID); err != nil {
+		return 0, err
+	}
+	var v int
+	if err := tx.QueryRow(`SELECT review_retries FROM tasks WHERE task_id = ?`, taskID).Scan(&v); err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return v, nil
+}
