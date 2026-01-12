@@ -35,6 +35,17 @@ func usage(w io.Writer) {
 	_, _ = fmt.Fprintln(w, "  molecular cleanup <task-id>")
 	_, _ = fmt.Fprintln(w, "  molecular version")
 	_, _ = fmt.Fprintln(w, "  molecular doctor [--json]")
+	_, _ = fmt.Fprintln(w, "")
+	_, _ = fmt.Fprintln(w, "doctor checks:")
+	_, _ = fmt.Fprintln(w, "  - git in PATH (required)")
+	_, _ = fmt.Fprintln(w, "  - gh in PATH (optional)")
+	_, _ = fmt.Fprintln(w, "  - .molecular/config.toml exists")
+	_, _ = fmt.Fprintln(w, "  - .molecular/lithium.sh and .molecular/chlorine.sh exist + executable")
+	_, _ = fmt.Fprintln(w, "")
+	_, _ = fmt.Fprintln(w, "exit codes:")
+	_, _ = fmt.Fprintln(w, "  0: ok")
+	_, _ = fmt.Fprintln(w, "  1: problems found")
+	_, _ = fmt.Fprintln(w, "  2: usage error")
 }
 
 // run executes the CLI logic and returns an exit code.
