@@ -332,6 +332,7 @@ func (s *Store) UpdateAttemptStatus(attemptID int64, status, errorSummary string
 			}
 			return 0, err
 		}
+		var newCount int
 		func() {
 			defer func() { _ = tx.Rollback() }()
 
