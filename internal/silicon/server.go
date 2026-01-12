@@ -104,6 +104,10 @@ func (s *Server) handleGetTask(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing task_id", http.StatusBadRequest)
 		return
 	}
+	if err := paths.ValidateTaskID(taskID); err != nil {
+		http.Error(w, "invalid task_id", http.StatusBadRequest)
+		return
+	}
 
 	task, err := s.store.GetTask(taskID)
 	if isNotFound(err) {
