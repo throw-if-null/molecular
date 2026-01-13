@@ -30,7 +30,7 @@ func TestRetrySemantics_CarbonTransient(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	// fast polling
-	cancelFn := silicon.StartCarbonWorker(ctx, s, td, 10*time.Millisecond)
+	cancelFn := silicon.StartCarbonWorker(ctx, s, td, &silicon.RealCommandRunner{}, []string{"echo", "err"}, 10*time.Millisecond)
 	defer cancelFn()
 
 	// wait until task becomes failed or exceeds budget
@@ -255,7 +255,7 @@ func TestRetrySemantics_ReviewLoop(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cFn := silicon.StartCarbonWorker(ctx, s, td, 10*time.Millisecond)
+	cFn := silicon.StartCarbonWorker(ctx, s, td, &silicon.RealCommandRunner{}, []string{"echo", "ok"}, 10*time.Millisecond)
 	hFn := silicon.StartHeliumWorker(ctx, s, td, 10*time.Millisecond)
 	defer cFn()
 	defer hFn()

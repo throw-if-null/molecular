@@ -55,9 +55,14 @@ func TestCarbonWorker_creates_attempt_and_transitions(t *testing.T) {
 		t.Fatalf("update phase: %v", err)
 	}
 
+	// ensure worktree exists (simulate lithium)
+	if task, terr := s.GetTask(taskID); terr == nil {
+		fullWT := filepath.Join(td, task.WorktreePath)
+		_ = os.MkdirAll(fullWT, 0o755)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cancelFn := silicon.StartCarbonWorker(ctx, s, td, 10*time.Millisecond)
+	cancelFn := silicon.StartCarbonWorker(ctx, s, td, &silicon.RealCommandRunner{}, []string{"echo", "ok"}, 10*time.Millisecond)
 	defer cancelFn()
 
 	// wait for worker to do its job
