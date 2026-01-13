@@ -13,7 +13,7 @@ This repo currently focuses on a deterministic, debuggable execution model with:
 
 ## Status
 
-This is an early implementation. Some parts are stubbed (notably Carbon/Helium “agent execution” and streaming logs), but the core APIs, persistence, artifacts layout, hooks, and retry loop scaffolding exist.
+This is an early implementation with a working end-to-end pipeline. All four workers (Lithium, Carbon, Helium, Chlorine) are implemented and execute real commands with streaming logs, retry semantics, and cancellation support.
 
 ## Concepts
 
@@ -22,7 +22,7 @@ Molecular uses a chemistry naming theme for roles:
 - **Lithium**: setup worker (ensure worktree, run setup hook)
 - **Carbon**: builder worker (implements changes)
 - **Helium**: inspector worker (reviews changes)
-- **Chlorine**: finisher worker (wrap-up hook; future PR creation)
+- **Chlorine**: finisher worker (commits changes and creates PR)
 
 A task progresses through phases (setup/build/review/finish) and records an **attempt** for each worker run. Attempts write artifacts to disk for debugging.
 
@@ -74,13 +74,15 @@ Health check:
 curl -s http://127.0.0.1:8711/healthz
 ```
 
-## End-to-end demo (stubbed pipeline)
+## End-to-end demo
 
-This repo currently includes a stubbed but end-to-end pipeline:
+
+This repo includes a working end-to-end pipeline:
 - Lithium creates/ensures the worktree (and optionally runs a hook)
-- Carbon/Helium/Chlorine record attempts and transition phases deterministically
+- Carbon runs the configured builder command and makes changes
+- Helium runs the configured inspector command, reviews changes, and decides (approved/changes_requested/rejected)
+- Chlorine commits changes to a task branch and creates a PR
 
-Even though Carbon/Helium are stubbed today, the UX/persistence/artifacts flow is real and you can test it end-to-end.
 
 ### 0) (Optional) configure hooks
 
