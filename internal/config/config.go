@@ -43,7 +43,7 @@ func Default() Config {
 	return Config{
 		Silicon: SiliconConfig{PollIntervalMS: 50},
 		Retry:   RetryConfig{CarbonBudget: 3, HeliumBudget: 3, ReviewBudget: 2},
-		Workers: WorkersConfig{CarbonConcurrency: 1, HeliumConcurrency: 1, CarbonCommand: []string{"echo", "carbon-stub"}, HeliumCommand: []string{"echo", "{\"decision\":\"approved\"}"}},
+		Workers: WorkersConfig{CarbonConcurrency: 1, HeliumConcurrency: 1, CarbonCommand: []string{"echo", "carbon-stub"}, HeliumCommand: []string{"opencode", "run", "--agent", "helium"}},
 		Hooks:   HooksConfig{Enabled: true, Lithium: filepath.ToSlash(filepath.Join(".molecular", "lithium.sh")), Chlorine: filepath.ToSlash(filepath.Join(".molecular", "chlorine.sh"))},
 	}
 }
