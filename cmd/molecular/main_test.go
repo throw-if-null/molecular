@@ -136,9 +136,7 @@ func TestListCancelLogsCleanup(t *testing.T) {
 
 	// logs
 	buf.Reset()
-	oldOut, wout = captureStdout(buf)
 	code = run([]string{"logs", "task-1"}, client, ts.URL, buf, bytes.NewBuffer(nil))
-	restoreStdout(oldOut, wout)
 	if code != 0 {
 		t.Fatalf("logs exit code: %d", code)
 	}
