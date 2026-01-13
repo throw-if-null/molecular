@@ -1,10 +1,12 @@
 package silicon
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -343,7 +345,8 @@ func StartCarbonWorker(ctx context.Context, s Store, repoRoot string, runner Com
 // placeholder artifacts (helium_result.json, log.txt) under the attempt artifacts dir.
 // After a successful stub run the task is transitioned to phase 'chlorine'.
 // interval controls the worker polling interval. If zero, defaults to 1s.
-func StartHeliumWorker(ctx context.Context, s Store, repoRoot string, interval time.Duration) context.CancelFunc {
+
+func StartHeliumWorker(ctx context.Context, s Store, repoRoot string, runner CommandRunner, heliumCmd []string, interval time.Duration) context.CancelFunc {
 	ctx, cancel := context.WithCancel(ctx)
 	go func() {
 		if interval <= 0 {
@@ -362,14 +365,12 @@ func StartHeliumWorker(ctx context.Context, s Store, repoRoot string, interval t
 				}
 				for _, t := range tasks {
 					if t.Phase == "helium" && t.Status == "running" {
-						// check previous attempt for crash recovery note
 						crashNote := ""
 						if prev, perr := s.GetLatestAttemptByRole(t.TaskID, "helium"); perr == nil {
 							if strings.Contains(prev.ErrorSummary, "crash recovery") {
 								crashNote = "previous run crashed; continue from artifacts\n"
 							}
 						}
-						// create attempt
 						attemptID, artifactsDir, attemptNum, startedAt, err := s.CreateAttempt(t.TaskID, "helium")
 						if err != nil {
 							continue
@@ -377,27 +378,21 @@ func StartHeliumWorker(ctx context.Context, s Store, repoRoot string, interval t
 						if cancelled, cerr := s.IsTaskCancelled(t.TaskID); cerr == nil && cancelled {
 							fullDir, ferr := paths.SafeJoin(repoRoot, artifactsDir)
 							if ferr != nil {
-								// skip attempt if path unsafe
 								_, _ = s.UpdateAttemptStatus(attemptID, "failed", ferr.Error())
 								continue
 							}
-
 							_ = os.MkdirAll(fullDir, 0o755)
 							_ = os.WriteFile(filepath.Join(fullDir, "result.json"), []byte(`{"status":"cancelled","role":"helium"}`), 0o644)
 							_ = os.WriteFile(filepath.Join(fullDir, "log.txt"), []byte("cancelled\n"), 0o644)
 							_, _ = s.UpdateAttemptStatus(attemptID, "cancelled", "cancelled")
 							continue
 						}
-						// ensure dir exists under repoRoot
 						fullDir, ferr := paths.SafeJoin(repoRoot, artifactsDir)
 						if ferr != nil {
-							// skip attempt if path unsafe
 							_, _ = s.UpdateAttemptStatus(attemptID, "failed", ferr.Error())
 							continue
 						}
-
 						_ = os.MkdirAll(fullDir, 0o755)
-						// write meta for helium attempt
 						meta := map[string]interface{}{
 							"task_id":     t.TaskID,
 							"attempt_id":  attemptID,
@@ -409,15 +404,70 @@ func StartHeliumWorker(ctx context.Context, s Store, repoRoot string, interval t
 						if mb, err := json.Marshal(meta); err == nil {
 							_ = os.WriteFile(filepath.Join(fullDir, "meta.json"), mb, 0o644)
 						}
-						// simulate transient failure or request changes deterministically based on prompt
-						if strings.Contains(t.Prompt, "helium-fail") {
-							newCount, err := s.UpdateAttemptStatus(attemptID, "failed", "transient failure")
-							if err != nil {
+						// run external helium command in the task worktree
+						logf, lerr := os.Create(filepath.Join(fullDir, "log.txt"))
+						if lerr != nil {
+							_, _ = s.UpdateAttemptStatus(attemptID, "failed", lerr.Error())
+							updateTaskPhaseWithRetries(s, t.TaskID, "helium", "failed")
+							continue
+						}
+						_, _ = logf.WriteString("command: ")
+						_, _ = logf.WriteString(strings.Join(heliumCmd, " ") + "\n")
+						_, _ = logf.WriteString("workdir: " + t.WorktreePath + "\n")
+						_, _ = logf.WriteString("started_at: " + startedAt + "\n")
+						wtFull := ""
+						if t.WorktreePath != "" {
+							if p, perr := paths.SafeJoin(repoRoot, t.WorktreePath); perr == nil {
+								wtFull = p
+							}
+						}
+						if wtFull == "" {
+							_, _ = logf.WriteString("missing worktree\n")
+							_ = logf.Close()
+							_ = os.WriteFile(filepath.Join(fullDir, "result.json"), []byte(`{"status":"failed","role":"helium","exit_code":-1}`), 0o644)
+							_, _ = s.UpdateAttemptStatus(attemptID, "failed", "missing worktree")
+							updateTaskPhaseWithRetries(s, t.TaskID, "helium", "failed")
+							continue
+						}
+						attemptCtx, attemptCancel := context.WithCancel(ctx)
+						RegisterAttemptCanceler(t.TaskID, attemptCancel)
+						defer UnregisterAttemptCanceler(t.TaskID)
+						defer attemptCancel()
+						ec, err := runner.Run(attemptCtx, wtFull, heliumCmd, nil, logf, logf)
+						finishedAt := time.Now().UTC().Format(time.RFC3339Nano)
+						_, _ = logf.WriteString("finished_at: " + finishedAt + "\n")
+						_, _ = logf.WriteString("exit_code: ")
+						_, _ = logf.WriteString(fmt.Sprintf("%d\n", ec))
+						_ = logf.Close()
+						outB, _ := os.ReadFile(filepath.Join(fullDir, "log.txt"))
+						// attempt to parse first non-empty line of stdout/stderr as JSON decision
+						decisionObj := map[string]interface{}{}
+						// helper: split lines and find first non-empty
+						lines := bytes.Split(outB, []byte("\n"))
+						var first []byte
+						for _, L := range lines {
+							if len(bytes.TrimSpace(L)) > 0 {
+								first = bytes.TrimSpace(L)
+								break
+							}
+						}
+						parseErr := errors.New("no decision parsed")
+						if first != nil {
+							parseErr = json.Unmarshal(first, &decisionObj)
+						}
+						if err != nil {
+							if errors.Is(err, context.Canceled) {
+								_ = os.WriteFile(filepath.Join(fullDir, "result.json"), []byte(`{"status":"cancelled","role":"helium"}`), 0o644)
+								_, _ = s.UpdateAttemptStatus(attemptID, "cancelled", "cancelled")
+								_ = s.UpdateTaskPhaseAndStatus(t.TaskID, t.Phase, "cancelled")
+								continue
+							}
+							_ = os.WriteFile(filepath.Join(fullDir, "result.json"), []byte(`{"status":"failed","role":"helium","exit_code":`+fmt.Sprintf("%d", ec)+`}`), 0o644)
+							newCount, uerr := s.UpdateAttemptStatus(attemptID, "failed", err.Error())
+							if uerr != nil {
 								updateTaskPhaseWithRetries(s, t.TaskID, "helium", "failed")
 								continue
 							}
-							_ = os.WriteFile(filepath.Join(fullDir, "result.json"), []byte(`{"status":"failed","role":"helium"}`), 0o644)
-							_ = os.WriteFile(filepath.Join(fullDir, "log.txt"), []byte(crashNote+"helium transient failure\n"), 0o644)
 							if newCount >= t.HeliumBudget {
 								updateTaskPhaseWithRetries(s, t.TaskID, "helium", "failed")
 							} else {
@@ -425,33 +475,44 @@ func StartHeliumWorker(ctx context.Context, s Store, repoRoot string, interval t
 							}
 							continue
 						}
-						if strings.Contains(t.Prompt, "needs-changes") {
-							// helium requests changes -> increment review counter and send back to carbon
-							newCount, err := s.IncrementReviewRetries(t.TaskID)
-							if err != nil {
+						// if we couldn't parse from first line, try whole output
+						if parseErr != nil {
+							parseErr = json.Unmarshal(bytes.TrimSpace(outB), &decisionObj)
+						}
+						if parseErr != nil {
+							_, _ = s.UpdateAttemptStatus(attemptID, "failed", "helium: invalid decision JSON")
+							_ = os.WriteFile(filepath.Join(fullDir, "result.json"), []byte(`{"status":"failed","role":"helium","note":"invalid decision"}`), 0o644)
+							updateTaskPhaseWithRetries(s, t.TaskID, "helium", "failed")
+							continue
+						}
+						if mb, merr := json.Marshal(decisionObj); merr == nil {
+							_ = os.WriteFile(filepath.Join(fullDir, "result.json"), mb, 0o644)
+						}
+						dec, _ := decisionObj["decision"].(string)
+						switch dec {
+						case "approved":
+							_, _ = s.UpdateAttemptStatus(attemptID, "ok", "approved")
+							_ = s.UpdateTaskPhaseAndStatus(t.TaskID, "chlorine", "running")
+						case "changes_requested":
+							newCount, cerr := s.IncrementReviewRetries(t.TaskID)
+							if cerr != nil {
 								_, _ = s.UpdateAttemptStatus(attemptID, "failed", "increment review failed")
 								updateTaskPhaseWithRetries(s, t.TaskID, "helium", "failed")
 								continue
 							}
-							_ = os.WriteFile(filepath.Join(fullDir, "result.json"), []byte(`{"status":"changes_requested","role":"helium"}`), 0o644)
-							_ = os.WriteFile(filepath.Join(fullDir, "log.txt"), []byte(crashNote+"helium requested changes\n"), 0o644)
 							_, _ = s.UpdateAttemptStatus(attemptID, "ok", "changes requested")
 							if newCount > t.ReviewBudget {
-								// exceeded review budget -> fail
 								updateTaskPhaseWithRetries(s, t.TaskID, "helium", "failed")
 							} else {
-								// send back to carbon for a full review retry
 								_ = s.UpdateTaskPhaseAndStatus(t.TaskID, "carbon", "running")
 							}
-							continue
+						case "rejected":
+							_, _ = s.UpdateAttemptStatus(attemptID, "failed", "rejected")
+							_ = s.UpdateTaskPhaseAndStatus(t.TaskID, "helium", "failed")
+						default:
+							_, _ = s.UpdateAttemptStatus(attemptID, "failed", "unknown decision")
+							updateTaskPhaseWithRetries(s, t.TaskID, "helium", "failed")
 						}
-						// otherwise approved
-						_ = os.WriteFile(filepath.Join(fullDir, "result.json"), []byte(`{"status":"approved","role":"helium"}`), 0o644)
-						_ = os.WriteFile(filepath.Join(fullDir, "log.txt"), []byte(crashNote+"helium stub run\n"), 0o644)
-						// mark attempt ok
-						_, _ = s.UpdateAttemptStatus(attemptID, "ok", "")
-						// transition task to chlorine (keep status running)
-						_ = s.UpdateTaskPhaseAndStatus(t.TaskID, "chlorine", "running")
 					}
 				}
 			}
