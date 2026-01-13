@@ -4,25 +4,42 @@ This directory tracks the work needed to get to a real v1 product.
 
 ## Feature index
 
-### Configuration
-- `planning/v1/features/config/README.md`
+See `planning/v1/features/README.md` for the complete list.
 
-### API
-- `planning/v1/features/api/logs-endpoint.md`
+### Active features (v1.1)
 
-### Workers
-- `planning/v1/features/workers/carbon-exec.md`
-- `planning/v1/features/workers/helium-exec.md`
-- `planning/v1/features/workers/chlorine-pr.md`
+**Templates:**
+- `planning/v1/features/templates/README.md` - Prompt templates + skills system
 
-### CLI
-- `planning/v1/features/cli/status-ux.md`
-- `planning/v1/features/cli/cleanup.md`
+**CLI:**
+- `planning/v1/features/cli/history.md` - `molecular history` command
+- `planning/v1/features/cli/completions.md` - Bash completions
+- `planning/v1/features/cli/watch-mode.md` - `--watch` mode for status
 
-### Ops
-- `planning/v1/features/ops/cancellation.md`
-- `planning/v1/features/ops/crash-recovery.md`
-- `planning/v1/features/ops/security.md`
+**Operations:**
+- `planning/v1/features/ops/otel.md` - OpenTelemetry (logging + tracing)
+
+### Completed features (v1.0)
+
+**Configuration:**
+- `planning/v1/features/config/README.md` ✓
+
+**API:**
+- Logs endpoint ✓
+
+**Workers:**
+- Carbon (builder) execution ✓
+- Helium (inspector) execution ✓
+- Chlorine (PR creation) ✓
+
+**CLI:**
+- Status UX improvements ✓
+- Cleanup command ✓
+
+**Operations:**
+- Cancellation semantics ✓
+- Crash recovery ✓
+- Security (path traversal prevention) ✓
 
 ## Workflow
 
