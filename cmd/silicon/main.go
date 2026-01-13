@@ -61,7 +61,7 @@ func main() {
 	defer carbonCancel()
 	heliumCancel := silicon.StartHeliumWorker(ctx, s, repoRoot, &silicon.RealCommandRunner{}, cfgRes.Config.Workers.HeliumCommand, poll)
 	defer heliumCancel()
-	chlorineCancel := silicon.StartChlorineWorker(ctx, s, repoRoot, poll)
+	chlorineCancel := silicon.StartChlorineWorkerWithRunner(ctx, s, repoRoot, &silicon.RealCommandRunner{}, cfgRes.Config.Workers.ChlorineCommand, poll)
 	defer chlorineCancel()
 
 	srv := silicon.NewServer(s, cfgRes.Config.Retry.CarbonBudget, cfgRes.Config.Retry.HeliumBudget, cfgRes.Config.Retry.ReviewBudget)
