@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -273,6 +272,9 @@ func StartCarbonWorker(ctx context.Context, s Store, repoRoot string, runner Com
 						_, _ = logf.WriteString(strings.Join(carbonCmd, " ") + "\n")
 						_, _ = logf.WriteString("workdir: " + t.WorktreePath + "\n")
 						_, _ = logf.WriteString("started_at: " + startedAt + "\n")
+						if crashNote != "" {
+							_, _ = logf.WriteString(crashNote)
+						}
 						wtFull := ""
 						if t.WorktreePath != "" {
 							if p, perr := paths.SafeJoin(repoRoot, t.WorktreePath); perr == nil {
@@ -415,6 +417,9 @@ func StartHeliumWorker(ctx context.Context, s Store, repoRoot string, runner Com
 						_, _ = logf.WriteString(strings.Join(heliumCmd, " ") + "\n")
 						_, _ = logf.WriteString("workdir: " + t.WorktreePath + "\n")
 						_, _ = logf.WriteString("started_at: " + startedAt + "\n")
+						if crashNote != "" {
+							_, _ = logf.WriteString(crashNote)
+						}
 						wtFull := ""
 						if t.WorktreePath != "" {
 							if p, perr := paths.SafeJoin(repoRoot, t.WorktreePath); perr == nil {
