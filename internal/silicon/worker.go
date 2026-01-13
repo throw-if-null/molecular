@@ -445,14 +445,18 @@ func StartHeliumWorker(ctx context.Context, s Store, repoRoot string, runner Com
 						_, _ = logf.WriteString(fmt.Sprintf("%d\n", ec))
 						_ = logf.Close()
 						outB, _ := os.ReadFile(filepath.Join(fullDir, "log.txt"))
-						// attempt to parse first non-empty line of stdout/stderr as JSON decision
+						// attempt to parse first JSON-looking line of stdout/stderr as decision
 						decisionObj := map[string]interface{}{}
-						// helper: split lines and find first non-empty
 						lines := bytes.Split(outB, []byte("\n"))
 						var first []byte
 						for _, L := range lines {
-							if len(bytes.TrimSpace(L)) > 0 {
-								first = bytes.TrimSpace(L)
+							t := bytes.TrimSpace(L)
+							if len(t) == 0 {
+								continue
+							}
+							// pick the first line that looks like JSON (object or array)
+							if t[0] == '{' || t[0] == '[' {
+								first = t
 								break
 							}
 						}
@@ -480,7 +484,7 @@ func StartHeliumWorker(ctx context.Context, s Store, repoRoot string, runner Com
 							}
 							continue
 						}
-						// if we couldn't parse from first line, try whole output
+						// fallback: try whole output only if we didn't find a JSON-looking line
 						if parseErr != nil {
 							parseErr = json.Unmarshal(bytes.TrimSpace(outB), &decisionObj)
 						}
@@ -490,6 +494,7 @@ func StartHeliumWorker(ctx context.Context, s Store, repoRoot string, runner Com
 							updateTaskPhaseWithRetries(s, t.TaskID, "helium", "failed")
 							continue
 						}
+
 						if mb, merr := json.Marshal(decisionObj); merr == nil {
 							_ = os.WriteFile(filepath.Join(fullDir, "result.json"), mb, 0o644)
 						}
