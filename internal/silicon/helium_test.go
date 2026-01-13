@@ -28,7 +28,12 @@ func TestHeliumWorker_creates_attempt_and_transitions(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cancelFn := silicon.StartHeliumWorker(ctx, s, td, 10*time.Millisecond)
+	// ensure worktree exists (simulate lithium)
+	if task, terr := s.GetTask(taskID); terr == nil {
+		fullWT := filepath.Join(td, task.WorktreePath)
+		_ = os.MkdirAll(fullWT, 0o755)
+	}
+	cancelFn := silicon.StartHeliumWorker(ctx, s, td, &silicon.RealCommandRunner{}, []string{"echo", "{\"decision\":\"approved\"}"}, 10*time.Millisecond)
 	defer cancelFn()
 
 	// wait for worker to do its job
