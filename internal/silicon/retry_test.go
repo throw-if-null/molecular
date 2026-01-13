@@ -3,9 +3,11 @@ package silicon_test
 import (
 	"context"
 	"database/sql"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -13,6 +15,23 @@ import (
 	"github.com/throw-if-null/molecular/internal/silicon"
 	_ "modernc.org/sqlite"
 )
+
+type seqRunner struct {
+	mu    sync.Mutex
+	calls int
+}
+
+func (r *seqRunner) Run(ctx context.Context, dir string, argv []string, env []string, stdout, stderr io.Writer) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.calls++
+	if r.calls == 1 {
+		stdout.Write([]byte("{\"decision\":\"changes_requested\"}\n"))
+	} else {
+		stdout.Write([]byte("{\"decision\":\"approved\"}\n"))
+	}
+	return 0, nil
+}
 
 func TestRetrySemantics_CarbonTransient(t *testing.T) {
 	s, db, td, cleanup := setupTestStoreWithDB(t)
@@ -82,7 +101,7 @@ func TestRetrySemantics_HeliumTransient(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cancelFn := silicon.StartHeliumWorker(ctx, s, td, 10*time.Millisecond)
+	cancelFn := silicon.StartHeliumWorker(ctx, s, td, &silicon.RealCommandRunner{}, []string{"sh", "-c", "exit 1"}, 10*time.Millisecond)
 	defer cancelFn()
 
 	// Wait deterministically for the helium_retries counter to reach the
@@ -256,7 +275,8 @@ func TestRetrySemantics_ReviewLoop(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cFn := silicon.StartCarbonWorker(ctx, s, td, &silicon.RealCommandRunner{}, []string{"echo", "ok"}, 10*time.Millisecond)
-	hFn := silicon.StartHeliumWorker(ctx, s, td, 10*time.Millisecond)
+	// helium runner will return changes_requested once, then approved (seqRunner defined above)
+	hFn := silicon.StartHeliumWorker(ctx, s, td, &seqRunner{}, []string{"unused"}, 10*time.Millisecond)
 	defer cFn()
 	defer hFn()
 
