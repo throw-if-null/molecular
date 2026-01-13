@@ -275,6 +275,10 @@ func StartCarbonWorker(ctx context.Context, s Store, repoRoot string, runner Com
 						if crashNote != "" {
 							_, _ = logf.WriteString(crashNote)
 						}
+
+						if crashNote != "" {
+							_, _ = logf.WriteString(crashNote)
+						}
 						wtFull := ""
 						if t.WorktreePath != "" {
 							if p, perr := paths.SafeJoin(repoRoot, t.WorktreePath); perr == nil {
@@ -420,6 +424,10 @@ func StartHeliumWorker(ctx context.Context, s Store, repoRoot string, runner Com
 						if crashNote != "" {
 							_, _ = logf.WriteString(crashNote)
 						}
+
+						if crashNote != "" {
+							_, _ = logf.WriteString(crashNote)
+						}
 						wtFull := ""
 						if t.WorktreePath != "" {
 							if p, perr := paths.SafeJoin(repoRoot, t.WorktreePath); perr == nil {
@@ -537,7 +545,7 @@ func StartHeliumWorker(ctx context.Context, s Store, repoRoot string, runner Com
 // After a successful stub run the task is transitioned to a terminal state
 // (phase 'done', status 'completed'). The worker is idempotent: it only acts on
 // tasks with status 'running'.
-func StartChlorineWorker(ctx context.Context, s Store, repoRoot string, interval time.Duration) context.CancelFunc {
+func StartChlorineWorkerWithRunner(ctx context.Context, s Store, repoRoot string, runner CommandRunner, chlorineCmd []string, interval time.Duration) context.CancelFunc {
 	ctx, cancel := context.WithCancel(ctx)
 	go func() {
 		if interval <= 0 {
@@ -556,14 +564,12 @@ func StartChlorineWorker(ctx context.Context, s Store, repoRoot string, interval
 				}
 				for _, t := range tasks {
 					if t.Phase == "chlorine" && t.Status == "running" {
-						// check previous attempt for crash recovery note
 						crashNote := ""
 						if prev, perr := s.GetLatestAttemptByRole(t.TaskID, "chlorine"); perr == nil {
 							if strings.Contains(prev.ErrorSummary, "crash recovery") {
 								crashNote = "previous run crashed; continue from artifacts\n"
 							}
 						}
-						// create attempt
 						attemptID, artifactsDir, attemptNum, startedAt, err := s.CreateAttempt(t.TaskID, "chlorine")
 						if err != nil {
 							continue
@@ -571,11 +577,9 @@ func StartChlorineWorker(ctx context.Context, s Store, repoRoot string, interval
 						if cancelled, cerr := s.IsTaskCancelled(t.TaskID); cerr == nil && cancelled {
 							fullDir, ferr := paths.SafeJoin(repoRoot, artifactsDir)
 							if ferr != nil {
-								// skip attempt if path unsafe
 								_, _ = s.UpdateAttemptStatus(attemptID, "failed", ferr.Error())
 								continue
 							}
-
 							_ = os.MkdirAll(fullDir, 0o755)
 							_ = os.WriteFile(filepath.Join(fullDir, "result.json"), []byte(`{"status":"cancelled","role":"chlorine"}`), 0o644)
 							_ = os.WriteFile(filepath.Join(fullDir, "log.txt"), []byte("cancelled\n"), 0o644)
@@ -584,11 +588,9 @@ func StartChlorineWorker(ctx context.Context, s Store, repoRoot string, interval
 						}
 						fullDir, ferr := paths.SafeJoin(repoRoot, artifactsDir)
 						if ferr != nil {
-							// skip attempt if path unsafe
 							_, _ = s.UpdateAttemptStatus(attemptID, "failed", ferr.Error())
 							continue
 						}
-
 						_ = os.MkdirAll(fullDir, 0o755)
 						meta := map[string]interface{}{
 							"task_id":     t.TaskID,
@@ -601,38 +603,104 @@ func StartChlorineWorker(ctx context.Context, s Store, repoRoot string, interval
 						if mb, err := json.Marshal(meta); err == nil {
 							_ = os.WriteFile(filepath.Join(fullDir, "meta.json"), mb, 0o644)
 						}
-						// run optional chlorine hook
-						hookOut := ""
-						hookErr := error(nil)
-						hookPath := filepath.Join(repoRoot, ".molecular", "chlorine.sh")
-						if fi, err := os.Stat(hookPath); err == nil {
-							if runtime.GOOS == "windows" {
-								hookOut = "skipped chlorine.sh on windows\n"
-							} else if fi.Mode()&0111 == 0 {
-								hookOut = "chlorine.sh exists but not executable, skipping\n"
-							} else {
-								cmd := exec.CommandContext(ctx, "/bin/sh", "-x", hookPath)
-								cmd.Dir = fullDir
-								out, err := cmd.CombinedOutput()
-								hookOut = string(out)
-								hookErr = err
+						wtFull := ""
+						if t.WorktreePath != "" {
+							if p, perr := paths.SafeJoin(repoRoot, t.WorktreePath); perr == nil {
+								wtFull = p
 							}
 						}
-						_ = os.WriteFile(filepath.Join(fullDir, "result.json"), []byte(`{"status":"completed","note":"stub","role":"chlorine"}`), 0o644)
-						_ = os.WriteFile(filepath.Join(fullDir, "log.txt"), []byte(crashNote+"chlorine stub run\n"+hookOut), 0o644)
-						if hookErr != nil {
-							_, _ = s.UpdateAttemptStatus(attemptID, "failed", hookErr.Error())
+						if wtFull == "" {
+							_ = os.WriteFile(filepath.Join(fullDir, "result.json"), []byte(`{"status":"failed","role":"chlorine","note":"missing worktree"}`), 0o644)
+							_, _ = s.UpdateAttemptStatus(attemptID, "failed", "missing worktree")
 							updateTaskPhaseWithRetries(s, t.TaskID, "chlorine", "failed")
 							continue
 						}
-						// mark attempt ok
-						_, _ = s.UpdateAttemptStatus(attemptID, "ok", "")
-						// transition task to terminal state
-						updateTaskPhaseWithRetries(s, t.TaskID, "done", "completed")
+						attemptCtx, attemptCancel := context.WithCancel(ctx)
+						RegisterAttemptCanceler(t.TaskID, attemptCancel)
+						defer UnregisterAttemptCanceler(t.TaskID)
+						defer attemptCancel()
+						logf, lerr := os.Create(filepath.Join(fullDir, "log.txt"))
+						if lerr != nil {
+							_, _ = s.UpdateAttemptStatus(attemptID, "failed", lerr.Error())
+							updateTaskPhaseWithRetries(s, t.TaskID, "chlorine", "failed")
+							continue
+						}
+						_, _ = logf.WriteString("started_at: " + startedAt + "\n")
+						if crashNote != "" {
+							_, _ = logf.WriteString(crashNote)
+						}
+
+						runCapture := func(argv []string, dir string) (int, string, string, error) {
+							var outb bytes.Buffer
+							var errb bytes.Buffer
+							ec, err := runner.Run(attemptCtx, dir, argv, nil, &outb, &errb)
+							return ec, outb.String(), errb.String(), err
+						}
+						targetBranch := "molecular/" + t.TaskID
+						if ec, _, _, err := runCapture([]string{"git", "checkout", "-b", targetBranch}, wtFull); err != nil || ec != 0 {
+							if ec2, _, _, err2 := runCapture([]string{"git", "checkout", targetBranch}, wtFull); err2 != nil || ec2 != 0 {
+								_, _ = logf.WriteString("git checkout error: " + fmt.Sprintf("%v", err2) + "\n")
+								_, _ = s.UpdateAttemptStatus(attemptID, "failed", "git checkout failed")
+								_ = os.WriteFile(filepath.Join(fullDir, "result.json"), []byte(`{"status":"failed","role":"chlorine"}`), 0o644)
+								updateTaskPhaseWithRetries(s, t.TaskID, "chlorine", "failed")
+								continue
+							}
+						}
+						if _, stOut, _, _ := runCapture([]string{"git", "status", "--porcelain"}, wtFull); strings.TrimSpace(stOut) != "" {
+							_, _, _, _ = runCapture([]string{"git", "add", "-A"}, wtFull)
+							if _, _, _, cerr := runCapture([]string{"git", "commit", "-m", "molecular: " + t.TaskID}, wtFull); cerr != nil {
+								_, _ = logf.WriteString("git commit failed: " + fmt.Sprintf("%v", cerr) + "\n")
+								_, _ = s.UpdateAttemptStatus(attemptID, "failed", "git commit failed")
+								_ = os.WriteFile(filepath.Join(fullDir, "result.json"), []byte(`{"status":"failed","role":"chlorine"}`), 0o644)
+								updateTaskPhaseWithRetries(s, t.TaskID, "chlorine", "failed")
+								continue
+							}
+						} else {
+							_, _ = logf.WriteString("no changes to commit\n")
+						}
+						if ec, pout, perrout, err := runCapture(chlorineCmd, wtFull); err != nil || ec != 0 {
+							msg := "gh command failed"
+							if err != nil {
+								msg = fmt.Sprintf("%v", err)
+							}
+							_, _ = s.UpdateAttemptStatus(attemptID, "failed", msg)
+							_ = os.WriteFile(filepath.Join(fullDir, "result.json"), []byte(`{"status":"failed","role":"chlorine","error_summary":"`+msg+`"}`), 0o644)
+							updateTaskPhaseWithRetries(s, t.TaskID, "chlorine", "failed")
+							continue
+						} else {
+							_, _ = logf.WriteString("gh stdout:\n" + pout + "\n")
+							_, _ = logf.WriteString("gh stderr:\n" + perrout + "\n")
+							finishedAt := time.Now().UTC().Format(time.RFC3339Nano)
+							_, _ = logf.WriteString("finished_at: " + finishedAt + "\n")
+							_, _ = logf.WriteString("exit_code: " + fmt.Sprintf("%d\n", ec))
+							prURL := ""
+							for _, line := range strings.Split(pout, "\n") {
+								l := strings.TrimSpace(line)
+								if strings.HasPrefix(l, "http://") || strings.HasPrefix(l, "https://") {
+									prURL = l
+									break
+								}
+							}
+							resObj := map[string]interface{}{"role": "chlorine", "status": "ok"}
+							if prURL != "" {
+								resObj["pr_url"] = prURL
+							}
+							if mb, merr := json.Marshal(resObj); merr == nil {
+								_ = os.WriteFile(filepath.Join(fullDir, "result.json"), mb, 0o644)
+							}
+							_, _ = s.UpdateAttemptStatus(attemptID, "ok", "")
+							updateTaskPhaseWithRetries(s, t.TaskID, "done", "completed")
+						}
 					}
 				}
 			}
 		}
 	}()
 	return cancel
+}
+
+// StartChlorineWorker is backwards-compatible wrapper that uses the default
+// RealCommandRunner and configured chlorine command.
+func StartChlorineWorker(ctx context.Context, s Store, repoRoot string, interval time.Duration) context.CancelFunc {
+	return StartChlorineWorkerWithRunner(ctx, s, repoRoot, &RealCommandRunner{}, []string{"gh", "pr", "create", "--fill"}, interval)
 }
