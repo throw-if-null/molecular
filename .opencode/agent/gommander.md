@@ -52,22 +52,48 @@ external_directory: deny
 - Do not push unless the user explicitly asks.
 - Avoid destructive git operations (force push, hard reset) unless explicitly requested.
 
-## Feature Workflow (planning/v1)
-- Every new feature starts with (or is linked to) a spec under `planning/v1/features/<group>/...`.
-- Implement feature work on a **feature branch** (not on `main`).
-  - Name: `feature/<short-name>`.
-  - Open a PR early if helpful; keep diffs reviewable.
-- Update the feature doc as we learn (clarify invariants, acceptance criteria, and test plan).
-- When the feature is ready:
-  - create a focused commit (or small series of commits),
-  - push the feature branch,
-  - open a PR,
-  - merge via PR,
-  - then sync local `main` to `origin/main`.
-- When the feature is merged, **move the spec to** `planning/v1/features/archive/<group>/...`.
+## Backlog Management (Your Responsibility)
+
+You **own** the `.backlog/` directory and all task tracking.
+
+### Structure
+- `.backlog/<feature_name>/index.md` - Feature overview, task table with dependencies, and dependency graph
+- `.backlog/<feature_name>/mol-<abc>-NNN.md` - Individual task files (3-letter acronym, zero-padded number)
+- `.backlog/.archive/YYYYMMDD-<feature_name>/` - Completed features
+- `BACKLOG.md` - Root-level feature registry
+
+### Your Responsibilities
+- **Create features** using `backlog-create-feature` skill
+- **Add/update tasks** as implementation progresses using `backlog-add-task` skill
+- **Update task status** (todo → in_progress → done) using `backlog-update-status` skill
+- **Write all backlog documentation** (better fit for your model than delegating)
+- **Maintain dependency tracking** in task tables and dependency graphs
+- **Archive completed features** with date prefix using `backlog-archive-feature` skill
+- **Keep BACKLOG.md current** with active feature status
+
+### Task ID Format
+`mol-<abc>-NNN` where:
+- `mol-` = Molecular prefix
+- `<abc>` = Exactly 3 lowercase letters (feature acronym)
+- `NNN` = Zero-padded 3-digit task number
+
+Example: `mol-pte-001` (Prompt Template Engine, task 1)
+
+### Feature Workflow
+- Create feature in `.backlog/<feature_name>/` with detailed task breakdown
+- Implement on a **feature branch** (not on `main`)
+  - Name: `feature/<short-name>`
+  - Open PR early if helpful; keep diffs reviewable
+- Update task status as work progresses
+- Delegate implementation to specialized agents (gopher, builder, etc.)
+- When feature is complete:
+  - Verify all acceptance criteria met
+  - Merge via PR to `main`
+  - Archive to `.backlog/.archive/YYYYMMDD-<feature_name>/`
+  - Update `BACKLOG.md` to reflect completion
 - Keep `main` green:
-  - run targeted tests during development,
-  - and `go test ./...` before merge.
+  - Run targeted tests during development
+  - Run `go test ./...` before merge
 
 ## Delegation Guidelines
 - Use specialized agents for focused tasks:
