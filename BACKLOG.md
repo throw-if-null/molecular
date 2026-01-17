@@ -9,6 +9,10 @@ For detailed information about the backlog system, see [`.backlog/README.md`](.b
 | Feature | Status | Tasks | Description | Link |
 |---------|--------|-------|-------------|------|
 | Prompt Template Engine | todo | 10 | Generic template system for Carbon/Helium with variable substitution and skill composition | [Details](.backlog/prompt-engine/index.md) |
+| History Command | todo | 4 | View all attempts for a task with metadata (role, status, duration, errors) | [Details](.backlog/history-command/index.md) |
+| Bash Completions | todo | 3 | Tab-completion for molecular CLI commands, flags, and task IDs | [Details](.backlog/completions/index.md) |
+| Watch Mode | todo | 4 | Real-time status monitoring with auto-refresh and phase transitions | [Details](.backlog/watch-mode/index.md) |
+| OpenTelemetry | todo | 8 | Structured logging and distributed tracing for observability | [Details](.backlog/opentelemetry/index.md) |
 
 ## Archived Features
 
