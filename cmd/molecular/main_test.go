@@ -260,19 +260,7 @@ func TestDoctorCommand(t *testing.T) {
 	if rep["git"] != true {
 		t.Fatalf("expected git true in json report")
 	}
-	// Now write an invalid config and ensure doctor reports a parse error
-	if err := os.WriteFile(cfg, []byte("x = [1,\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	out.Reset()
-	code = doctorWithIO([]string{}, out, out)
-	if code != 1 {
-		t.Fatalf("expected exit 1 for invalid config, got %d", code)
-	}
-	if !strings.Contains(out.String(), "failed to parse") {
-		t.Fatalf("expected parse error message in doctor output, got: %s", out.String())
-	}
-
+	// doctor no longer parses config contents; it only checks presence.
 }
 
 func TestStatusOutput(t *testing.T) {

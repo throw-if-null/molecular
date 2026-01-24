@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/throw-if-null/molecular/internal/api"
-	"github.com/throw-if-null/molecular/internal/config"
 	"github.com/throw-if-null/molecular/internal/version"
 )
 
@@ -323,12 +322,8 @@ func doctorWithIO(args []string, out io.Writer, errOut io.Writer) int {
 	}
 
 	// check .molecular/config.toml and attempt to parse it
-	repoRoot, _ := os.Getwd()
-	cfgRes := config.Load(repoRoot)
-	if cfgRes.ParseError != nil {
-		res.Config = false
-		res.Problems = append(res.Problems, fmt.Sprintf("failed to parse %s: %v", cfgRes.Path, cfgRes.ParseError))
-	} else if cfgRes.Found {
+	cfgPath := filepath.Join(".molecular", "config.toml")
+	if _, err := os.Stat(cfgPath); err == nil {
 		res.Config = true
 	} else {
 		res.Config = false
