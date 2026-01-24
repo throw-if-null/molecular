@@ -29,6 +29,9 @@ cmd/**/bin/
 # opencode local deps
 .opencode/node_modules/
 
+# opencode session logs
+.opencode/session-log/
+
 # OS/package managers
 pnpm-lock.yaml
 node_modules/
