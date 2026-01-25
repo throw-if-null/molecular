@@ -12,7 +12,7 @@ import (
 
 func TestExecute_EmitsSpans(t *testing.T) {
 	exp := tracetest.NewInMemoryExporter()
-	tp, shutdown, err := telemetry.newTracerProviderWithExporter(exp, telemetry.Config{ServiceName: "testsvc", ServiceVersion: "v0"})
+	tp, shutdown, err := telemetry.NewTracerProviderWithExporter(exp, telemetry.Config{ServiceName: "testsvc", ServiceVersion: "v0"})
 	if err != nil {
 		t.Fatalf("new tracer provider: %v", err)
 	}
