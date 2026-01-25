@@ -23,6 +23,29 @@ import (
 var telemetryInit = telemetry.Init
 var dotenvLoad = godotenv.Load
 
+// setup prepares the HTTP handler and initializes telemetry. It returns the
+// handler to serve, a shutdown function to clean up telemetry, and an error
+// if initialization failed. This is separated out to allow end-to-end tests
+// to call into the server without binding to a fixed port.
+func setup(ctx context.Context) (http.Handler, func(context.Context) error, error) {
+	if err := dotenvLoad(); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: loading .env: %v\n", err)
+	}
+
+	// initialize telemetry; fail-fast on error
+	shutdown := func(context.Context) error { return nil }
+	if initer := telemetryInit; initer != nil {
+		var err error
+		shutdown, err = initer(ctx, telemetry.Config{ServiceName: "molecular-silicon", ServiceVersion: version.Version})
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+
+	srv := newServer()
+	return srv, shutdown, nil
+}
+
 type server struct {
 	mu    sync.Mutex
 	tasks map[string]*storedTask
@@ -219,26 +242,18 @@ func (s *server) handleLogs(w http.ResponseWriter, r *http.Request, id string) {
 }
 
 func main() {
-	if err := dotenvLoad(); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: loading .env: %v\n", err)
-	}
-
-	// initialize telemetry
-	shutdown := func(context.Context) error { return nil }
-	if initer := telemetryInit; initer != nil {
-		var err error
-		shutdown, err = initer(context.Background(), telemetry.Config{ServiceName: "molecular-silicon", ServiceVersion: version.Version})
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "telemetry init: %v\n", err)
-		}
+	// perform setup; fail fast on telemetry init errors
+	handler, shutdown, err := setup(context.Background())
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "telemetry init: %v\n", err)
+		os.Exit(1)
 	}
 	defer shutdown(context.Background())
 
-	srv := newServer()
 	// use default listen addr
 	addr := fmt.Sprintf("%s:%d", api.DefaultHost, api.DefaultPort)
 	fmt.Fprintf(os.Stderr, "silicon: listening on %s\n", addr)
-	if err := http.ListenAndServe(addr, srv); err != nil && !errors.Is(err, http.ErrServerClosed) {
+	if err := http.ListenAndServe(addr, handler); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		fmt.Fprintf(os.Stderr, "server: %v\n", err)
 		os.Exit(1)
 	}
