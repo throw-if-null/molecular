@@ -12,11 +12,16 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/joho/godotenv"
 	"github.com/throw-if-null/molecular/internal/api"
 	"github.com/throw-if-null/molecular/internal/version"
 )
 
 func main() {
+	if err := godotenv.Load(); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: loading .env: %v\n", err)
+	}
+
 	client := &http.Client{Timeout: 30 * time.Second}
 	baseURL := fmt.Sprintf("http://%s:%d", api.DefaultHost, api.DefaultPort)
 	os.Exit(run(os.Args[1:], client, baseURL, os.Stdout, os.Stderr))
