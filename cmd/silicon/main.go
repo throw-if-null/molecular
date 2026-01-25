@@ -75,9 +75,8 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if strings.HasPrefix(r.URL.Path, "/v1/tasks/") {
-		// strip prefix
-		p := strings.TrimPrefix(r.URL.Path, "/v1/tasks/")
+	if p, ok := strings.CutPrefix(r.URL.Path, "/v1/tasks/"); ok {
+		// p is the path after the prefix
 		// possible forms: {id}, {id}/cancel, {id}/logs, {id}/cleanup
 		parts := strings.SplitN(p, "/", 2)
 		id := parts[0]
