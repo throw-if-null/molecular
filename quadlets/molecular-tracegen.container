@@ -1,0 +1,16 @@
+[Unit]
+Description=Molecular observability: trace generator (one-shot)
+Wants=molecular-otel-collector.service
+After=molecular-otel-collector.service
+
+[Service]
+Type=oneshot
+
+[Container]
+Image=ghcr.io/open-telemetry/opentelemetry-collector-contrib/telemetrygen:latest
+Network=molecular-observability.network
+LogDriver=journald
+
+# Emit a small batch of traces into the collector over OTLP/gRPC.
+PodmanArgs=--rm
+Exec=traces --otlp-insecure --otlp-endpoint molecular-otel-collector:4317 --service molecular-tracegen --traces 10

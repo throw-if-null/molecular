@@ -12,7 +12,7 @@ Establish a first-class observability foundation for Molecular (starting with Si
 
 - **OpenTelemetry tracing** (official OTel Go packages)
 - **slog** for traditional logs (only for lifecycle / non-trace-worthy events)
-- A **podman compose** stack that spins up **OpenTelemetry Collector + Jaeger** for local development
+- A **podman quadlet** stack (systemd units) that spins up **OpenTelemetry Collector + Jaeger** for local development
 
 ## Primary principles
 
@@ -48,14 +48,14 @@ Establish a first-class observability foundation for Molecular (starting with Si
   - `WARN/ERROR` fatal configuration or exporter issues
   - no chatty “workflow logs” — those should become span events
 
-### 3) Local dev stack (podman compose)
+### 3) Local dev stack (podman quadlets)
 
-Add a compose file (for podman) that starts:
+Add quadlet unit files (for podman + systemd) that start:
 
-- **otel-collector** (latest)
+- **otel-collector** (pinned)
   - OTLP receiver enabled (grpc + http)
   - exports traces to Jaeger
-- **jaeger** (latest)
+- **jaeger** (pinned, v2)
   - exposes UI port
 
 Also include a collector config file in-repo.
@@ -147,7 +147,7 @@ Guidance:
 
 ## Decisions (confirmed)
 
-- Compose filename: `compose.yml`
+- Local dev stack: **Podman Quadlets** (systemd units)
 - Jaeger: **all-in-one** (dev)
 - Sampling: **always on**
 - HTTP instrumentation: `otelhttp` is acceptable
@@ -179,22 +179,22 @@ And for `.env` handling:
 
 ## Subtasks (each on its own feature branch)
 
-### T000-1: Local dev tracing stack (podman compose + collector config)
+### T000-1: Local dev tracing stack (podman quadlets + collector config)
 
 Branch: `feature/T000-1-otel-dev-stack`
 
 Deliverables:
 
-- `compose.yml` (or `podman-compose.yml`) with `otel-collector` + `jaeger`
+- Quadlet unit files with `otel-collector` + `jaeger` (and an optional trace generator)
 - `otel-collector-config.yaml`
 - Short runbook:
-  - how to start stack
+  - how to start/stop stack
   - where to access Jaeger UI
   - what endpoint Silicon should export to
 
 Acceptance criteria:
 
-- `podman compose up` starts both services
+- Quadlet units start both services via `systemctl --user`
 - Jaeger UI reachable
 - Collector listens on OTLP (4317/4318)
 

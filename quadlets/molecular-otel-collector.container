@@ -1,0 +1,26 @@
+[Unit]
+Description=Molecular observability: OpenTelemetry Collector
+Wants=molecular-observability-network.service
+After=molecular-observability-network.service
+Wants=molecular-jaeger.service
+After=molecular-jaeger.service
+
+[Service]
+TimeoutStartSec=900
+
+[Container]
+# Use a fully-qualified image name to avoid Podman short-name prompts under systemd.
+Image=docker.io/otel/opentelemetry-collector:0.144.0
+ContainerName=molecular-otel-collector
+
+# Use the config shipped with this repo. The runbook copies it to this path.
+Volume=%h/.config/containers/systemd/molecular/molecular-otel-collector-config.yaml:/etc/otelcol/config.yaml:Z
+
+# The collector image entrypoint is the collector binary; pass it the config.
+Exec=--config=/etc/otelcol/config.yaml
+
+Network=molecular-observability.network
+PublishPort=4317:4317
+PublishPort=4318:4318
+
+LogDriver=journald
