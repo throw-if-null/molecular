@@ -2,8 +2,8 @@
 
 | field | value |
 | --- | --- |
-| status | TODO |
-| started_on |  |
+| status | IN PROGRESS |
+| started_on | 2026-01-25 12:15 |
 | finished_on |  |
 
 ## Goal
