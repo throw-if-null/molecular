@@ -17,7 +17,6 @@ import (
 	"github.com/throw-if-null/molecular/internal/task"
 	"github.com/throw-if-null/molecular/internal/telemetry"
 	"github.com/throw-if-null/molecular/internal/version"
-	"go.opentelemetry.io/otel"
 )
 
 // allow tests to override init functions
