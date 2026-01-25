@@ -1,101 +1,137 @@
 ---
 name: backlog-add-task
-description: Add a new task to an existing feature
+description: Create a new backlog task file in .backlog/
+license: MIT
+compatibility: opencode
 ---
 
 ## Purpose
-Add a new task file to a feature and update the index.md task table.
+Create a new task in `.backlog/` (flat layout) following the existing “T000/T001” style.
+
+This skill is interactive: create the task file early, then iterate with the human until the task is ready to be picked up for development.
+
+## When to use me
+- Use when the human says: “Create a task …” or provides a new `TXXX-...` task name.
+- Do NOT use for archiving; use `backlog-archive-task` for that.
 
 ## Prerequisites
-- Feature directory exists in `.backlog/<feature_name>/`
-- Feature acronym is known (exactly 3 letters)
-- Task details are clear (title, description, implementation steps)
+- The human can provide an explicit task ID (`TXXX`) and a short name.
+  - If the ID is not provided, you MUST compute and propose the next available `TXXX`.
 
 ## Procedure
+Use `todowrite` with the below checklist.
 
-1. **Determine next task ID**
-   - Find highest existing task number in feature directory
-   - Increment by 1
-   - Zero-pad to 3 digits
-   - Format: `mol-<abc>-NNN.md`
+1. **Determine the task identity**
+   - Ask for (or derive) the `TXXX` ID.
+     - Scan `.backlog/` for files matching `T\d\d\d-*.md` (excluding `.backlog/.archive/`).
+     - Next ID = (max existing numeric ID) + 1.
+     - IDs are zero-padded and start at `T000`.
+   - Ask for a short name to use in the filename.
+   - Filename format:
+     - `TXXX-My_task_name.md` (underscores allowed; keep it readable).
 
-2. **Create task file with this structure:**
+2. **Create the task file immediately (skeleton first)**
+   - Create `.backlog/<filename>` with the template below.
+   - Set `**Created:**` to today’s date (`YYYY-MM-DD`).
+   - Leave sections as placeholders; we will fill them in during iteration.
+
+3. **Iterate with the human to refine scope**
+   - Fill in:
+     - Goal
+     - Context
+     - Non-goals
+     - Deliverables
+     - Testing
+     - Acceptance criteria
+   - Ask for constraints and bake them into the task:
+     - dependency policy (new deps disallowed unless explicitly approved)
+     - target packages/areas
+     - must-have tests
+     - preferred branch name
+
+4. **Break down into subtasks (in the SAME file) when helpful**
+   - If the work is multi-phase or spans multiple areas, add a `## Subtasks` section.
+   - Subtask IDs must be:
+     - `TXXX-YY` (e.g. `T001-01`, `T001-02`)
+   - Subtasks live inside the task file (no separate files).
+   - Each subtask should have:
+     - a short title
+     - a brief definition of done
+     - optional owners/agents (if you want)
+     - optional dependencies between subtasks
+   - Prefer writing subtasks as a checklist so it’s easy to track progress.
+
+5. **Ensure the task is “ready for development”**
+   - The task should be implementable without guessing:
+     - acceptance criteria are testable
+     - testing instructions are explicit
+     - subtasks (if any) cover the deliverables
+     - scope boundaries are clear (non-goals)
+   - Do one last human confirmation: “Is this ready to pick up?”
+
+6. **Task file template**
 
    ```markdown
-   # <Task Title>
-   
-   **ID:** mol-<abc>-NNN  
-   **Status:** todo  
-   **Feature:** [Feature Name](./index.md)
-   
-   ## Objective
+   # TXXX - <Short descriptive title>
+
+   **Status:** TODO
+   **Created:** YYYY-MM-DD
+
+   ## Goal
    [Clear, concise statement of what this task accomplishes]
-   
+
    ## Context
-   [Why this task is needed, where it fits in the feature]
-   
-   ## Implementation Details
-   
-   ### Files to Create/Modify
-   - `path/to/file.go` - [what changes]
-   - `path/to/test.go` - [what tests]
-   
-   ### Step-by-Step Instructions
-   
-   1. **Step 1 title**
-      - Detailed instruction
-      - Code examples if helpful
-      - Expected outcome
-   
-   2. **Step 2 title**
-      - Detailed instruction
-      - Expected outcome
-   
-   ### Code Examples
-   
-   ```go
-   // Example implementation
-   ```
-   
+   [Why this task is needed; links to related tasks/PRs/issues if any]
+
+   ## Non-goals
+   - [What is explicitly out of scope]
+
+   ## Design / Approach
+   - [Key decisions, constraints, trade-offs]
+   - [Any compatibility/backwards-compat notes]
+
+   ## Deliverables
+   - [Concrete outputs]
+
+   ## Implementation notes
+
+   ### Files to create/modify
+   - `path/to/file.go` — …
+   - `path/to/file_test.go` — …
+
+   ### Steps
+   1. …
+   2. …
+
    ## Testing
-   
-   - [ ] Unit tests for X
-   - [ ] Integration test for Y
-   - [ ] Manual verification: Z
-   
-   ## Acceptance Criteria
-   
-   - [ ] Criterion 1
-   - [ ] Criterion 2
+   - [ ] `go test ./...`
+   - [ ] Targeted tests: …
+   - [ ] Manual verification: …
+
+   ## Acceptance criteria
+   - [ ] …
    - [ ] All tests passing
-   
-   ## Dependencies
-   
-   - Depends on: [mol-<abc>-NNN](./mol-<abc>-NNN.md) (if applicable)
-   - Blocks: [mol-<abc>-NNN](./mol-<abc>-NNN.md) (if applicable)
-   
+
    ## Notes
-   
-   [Any additional context, edge cases, or considerations]
+   [Edge cases, follow-ups]
+
+   ## Subtasks (optional)
+   - [ ] **TXXX-01** — <subtask title>
+     - DoD: <definition of done>
+   - [ ] **TXXX-02** — <subtask title>
+     - DoD: <definition of done>
    ```
 
-3. **Update index.md task table**
-   - Add new row with task ID, title, and status
-   - Ensure link is correct: `[mol-<abc>-NNN](./mol-<abc>-NNN.md)`
-   - Keep tasks in numerical order
-
-4. **Verify**
+7. **Verify**
    - Task file renders correctly
-   - Link from index.md works
-   - Task ID follows format exactly
+   - Filename matches `TXXX-*.md`
+   - The `Status` header is present and set to `TODO`
 
 ## Example Task Addition
 
-Adding task 4 to prompt-engine (pte):
+If the next available ID is `T002` and the short name is `Implement_some_task`:
 
-1. Create `.backlog/prompt-engine/mol-pte-004.md`
-2. Fill in template with task details
-3. Add to index.md:
-   ```markdown
-   | [mol-pte-004](./mol-pte-004.md) | Create base Carbon template | todo | |
-   ```
+1. Create `.backlog/T002-Implement_some_task.md`
+2. Fill in the template above
+3. Add subtasks like `T002-01`, `T002-02` if needed
+4. Iterate with the human until scope + acceptance criteria are crisp
