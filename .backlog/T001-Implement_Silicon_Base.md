@@ -1,5 +1,11 @@
 # T001 - Implement Silicon Base (skeleton + TDD)
 
+| field | value |
+| --- | --- |
+| status | TODO |
+| started_on |  |
+| finished_on |  |
+
 ## Goal
 
 Re-introduce a **minimal Silicon daemon** that supports a **single running task** (no queue), driven by **tests first** (red → green).

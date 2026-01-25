@@ -1,13 +1,13 @@
 ---
 name: backlog-archive-task
-description: Mark a .backlog task DONE and move it to .backlog/.archive/
+description: Mark a .backlog task DONE/CANCELLED and move it to .backlog/.archive/
 license: MIT
 compatibility: opencode
 ---
 
 ## Purpose
 Archive a backlog task by:
-1) updating its header `Status` to `DONE` with a date, and
+1) updating its header table fields (`status`, `finished_on`), and
 2) moving the task file from `.backlog/` to `.backlog/.archive/`.
 
 ## Prerequisites
@@ -21,11 +21,12 @@ Use `todowrite` with the below checklist.
    - Locate the file in `.backlog/` (NOT in `.backlog/.archive/`).
 
 2. **Update task header**
-   - Ensure the task has a header section immediately below the `# ...` title containing `Status:`.
-   - Set it to the exact format:
-     - `**Status:** DONE (YYYY-MM-DD)`
-   - If the task previously had `**Status:** TODO`, replace it.
-   - If the task has no `Status` header, insert one.
+   - Ask the human for the final status:
+     - `DONE` or `CANCELLED`
+   - Update the standardized header table (immediately below the title):
+     - set `status` to `DONE` or `CANCELLED`
+     - set `finished_on` to `YYYY-MM-DD HH:mm`
+   - If the header table is missing, add it.
 
 3. **Move to archive**
    - Ensure `.backlog/.archive/` exists (create it if missing).
@@ -34,7 +35,9 @@ Use `todowrite` with the below checklist.
 4. **Verify**
    - The task no longer exists in `.backlog/`.
    - The archived file exists in `.backlog/.archive/`.
-   - The archived file’s `Status` is `DONE (YYYY-MM-DD)`.
+   - The archived file’s header table has:
+     - `status` set to `DONE` or `CANCELLED`
+     - `finished_on` set to `YYYY-MM-DD HH:mm`
 
 ## Notes
 - Archiving is intentionally simple: no registry/index updates.

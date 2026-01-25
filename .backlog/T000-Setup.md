@@ -1,5 +1,11 @@
 # T000 - Setup: Observability (OTel tracing) + Logging + Local Dev Stack
 
+| field | value |
+| --- | --- |
+| status | TODO |
+| started_on |  |
+| finished_on |  |
+
 ## Goal
 
 Establish a first-class observability foundation for Molecular (starting with Silicon):

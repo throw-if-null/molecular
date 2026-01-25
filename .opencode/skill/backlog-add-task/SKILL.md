@@ -32,7 +32,7 @@ Use `todowrite` with the below checklist.
 
 2. **Create the task file immediately (skeleton first)**
    - Create `.backlog/<filename>` with the template below.
-   - Set `**Created:**` to today’s date (`YYYY-MM-DD`).
+   - Set the task header table `status` to `TODO`.
    - Leave sections as placeholders; we will fill them in during iteration.
 
 3. **Iterate with the human to refine scope**
@@ -74,8 +74,11 @@ Use `todowrite` with the below checklist.
    ```markdown
    # TXXX - <Short descriptive title>
 
-   **Status:** TODO
-   **Created:** YYYY-MM-DD
+   | field | value |
+   | --- | --- |
+   | status | TODO |
+   | started_on |  |
+   | finished_on |  |
 
    ## Goal
    [Clear, concise statement of what this task accomplishes]
@@ -125,7 +128,7 @@ Use `todowrite` with the below checklist.
 7. **Verify**
    - Task file renders correctly
    - Filename matches `TXXX-*.md`
-   - The `Status` header is present and set to `TODO`
+   - Header table exists and `status` is set to `TODO`
 
 ## Example Task Addition
 
