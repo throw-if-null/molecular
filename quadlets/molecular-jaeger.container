@@ -1,0 +1,18 @@
+[Unit]
+Description=Molecular observability: Jaeger (all-in-one)
+Wants=molecular-observability-network.service
+After=molecular-observability-network.service
+
+[Service]
+TimeoutStartSec=900
+
+[Container]
+# Use a fully-qualified image name to avoid Podman short-name prompts under systemd.
+# Jaeger v1 is EOL; use Jaeger v2.
+Image=cr.jaegertracing.io/jaegertracing/jaeger:2.14.1
+ContainerName=molecular-jaeger
+Network=molecular-observability.network
+PublishPort=16686:16686
+
+# Keep logs in journald for easy inspection.
+LogDriver=journald
