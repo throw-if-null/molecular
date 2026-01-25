@@ -22,6 +22,8 @@ func TestExecute_EmitsSpans(t *testing.T) {
 	// instead of calling otel.SetTracerProvider we reuse the provider directly
 
 	tr := tp.Tracer("silicon")
+	// install provider as global so Execute (which uses otel.Tracer) picks it up
+	otel.SetTracerProvider(tp)
 
 	// create a test task that succeeds
 	task := api.Task{TaskID: "task-1", Prompt: "do something"}
