@@ -6,6 +6,7 @@ import (
 
 	"github.com/throw-if-null/molecular/internal/api"
 	"github.com/throw-if-null/molecular/internal/telemetry"
+	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
