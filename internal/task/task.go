@@ -56,7 +56,7 @@ func Execute(ctx context.Context, t api.Task) error {
 // small helper to avoid importing strings in hot path; trivial and test-friendly
 func containsFail(s string) bool {
 	// simple case-insensitive check for "fail"
-	for i := 0; i+3 <= len(s); i++ {
+	for i := 0; i+4 <= len(s); i++ {
 		sub := s[i : i+4]
 		if sub == "fail" || sub == "FAIL" || sub == "Fail" {
 			return true
