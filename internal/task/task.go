@@ -2,6 +2,7 @@ package task
 
 import (
 	"context"
+	"errors"
 
 	"github.com/throw-if-null/molecular/internal/api"
 	"go.opentelemetry.io/otel"
@@ -16,7 +17,12 @@ import (
 // observe task progress.
 func Execute(ctx context.Context, t api.Task) error {
 	tr := otel.Tracer("silicon")
-	ctx, span := tr.Start(ctx, "silicon.task", trace.WithAttributes(attribute.String("task.id", t.TaskID)))
+	ctx, span := tr.Start(
+		ctx,
+		"silicon.task",
+		trace.WithNewRoot(),
+		trace.WithAttributes(attribute.String("task.id", t.TaskID)),
+	)
 	defer span.End()
 
 	// task created
@@ -25,14 +31,15 @@ func Execute(ctx context.Context, t api.Task) error {
 	// task started
 	span.AddEvent("task.started")
 
-	// simulate a child operation (attempt) so we can exercise context propagation
+	// child operation (attempt) to exercise context propagation
 	_, child := tr.Start(ctx, "silicon.attempt", trace.WithAttributes(attribute.String("task.id", t.TaskID)))
 	child.AddEvent("attempt.started")
-
-	// For this minimal implementation, treat a prompt that contains the
-	// substring "fail" as an injected error to exercise error recording.
-	if t.Prompt != "" && containsFail(t.Prompt) {
-		err := &taskError{msg: "simulated failure"}
+	select {
+	case <-ctx.Done():
+		err := ctx.Err()
+		if err == nil {
+			err = errors.New("context cancelled")
+		}
 		child.RecordError(err)
 		child.SetStatus(codes.Error, err.Error())
 		child.AddEvent("attempt.failed")
@@ -40,8 +47,9 @@ func Execute(ctx context.Context, t api.Task) error {
 
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		span.AddEvent("task.failed")
+		span.AddEvent("task.cancelled")
 		return err
+	default:
 	}
 
 	child.AddEvent("attempt.completed")
@@ -52,19 +60,3 @@ func Execute(ctx context.Context, t api.Task) error {
 	span.SetStatus(codes.Ok, "")
 	return nil
 }
-
-// small helper to avoid importing strings in hot path; trivial and test-friendly
-func containsFail(s string) bool {
-	// simple case-insensitive check for "fail"
-	for i := 0; i+4 <= len(s); i++ {
-		sub := s[i : i+4]
-		if sub == "fail" || sub == "FAIL" || sub == "Fail" {
-			return true
-		}
-	}
-	return false
-}
-
-type taskError struct{ msg string }
-
-func (t *taskError) Error() string { return t.msg }

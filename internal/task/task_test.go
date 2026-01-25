@@ -5,38 +5,42 @@ import (
 	"testing"
 
 	"github.com/throw-if-null/molecular/internal/api"
-	"github.com/throw-if-null/molecular/internal/telemetry"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	sdkresource "go.opentelemetry.io/otel/sdk/resource"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
 
 func TestExecute_EmitsSpans(t *testing.T) {
 	exp := tracetest.NewInMemoryExporter()
-	tp, shutdown, err := telemetry.NewTracerProviderWithExporter(exp, telemetry.Config{ServiceName: "testsvc", ServiceVersion: "v0"})
+	res, err := sdkresource.New(context.Background(), sdkresource.WithAttributes(
+		attribute.String("service.name", "testsvc"),
+		attribute.String("service.version", "v0"),
+	))
 	if err != nil {
-		t.Fatalf("new tracer provider: %v", err)
+		t.Fatalf("resource: %v", err)
 	}
-	// install tracer provider for global otel
-	// reuse telemetry package helpers
-	// set as global tracer provider so otel.Tracer picks it up
-	// instead of calling otel.SetTracerProvider we reuse the provider directly
 
-	tr := tp.Tracer("silicon")
-	// install provider as global so Execute (which uses otel.Tracer) picks it up
+	tp := sdktrace.NewTracerProvider(
+		sdktrace.WithResource(res),
+		sdktrace.WithSampler(sdktrace.ParentBased(sdktrace.AlwaysSample())),
+		sdktrace.WithSpanProcessor(sdktrace.NewBatchSpanProcessor(exp)),
+	)
+	prev := otel.GetTracerProvider()
 	otel.SetTracerProvider(tp)
+	defer otel.SetTracerProvider(prev)
+	defer func() {
+		_ = tp.Shutdown(context.Background())
+	}()
 
 	// create a test task that succeeds
 	task := api.Task{TaskID: "task-1", Prompt: "do something"}
 	ctx := context.Background()
 
-	// execute with tracer provider in place by using context
-	// start a root using tracer to ensure parent-based sampling works
-	_, root := tr.Start(ctx, "test.root")
 	if err := Execute(ctx, task); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	root.End()
 
 	if err := tp.ForceFlush(context.Background()); err != nil {
 		t.Fatalf("force flush: %v", err)
@@ -78,8 +82,51 @@ func TestExecute_EmitsSpans(t *testing.T) {
 	if !found {
 		t.Fatalf("did not find silicon.task span")
 	}
+}
 
-	if err := shutdown(context.Background()); err != nil {
-		t.Fatalf("shutdown: %v", err)
+func TestExecute_Cancelled_EmitsCancelledEvent(t *testing.T) {
+	exp := tracetest.NewInMemoryExporter()
+
+	tp := sdktrace.NewTracerProvider(
+		sdktrace.WithSampler(sdktrace.ParentBased(sdktrace.AlwaysSample())),
+		sdktrace.WithSpanProcessor(sdktrace.NewBatchSpanProcessor(exp)),
+	)
+	prev := otel.GetTracerProvider()
+	otel.SetTracerProvider(tp)
+	defer otel.SetTracerProvider(prev)
+	defer func() {
+		_ = tp.Shutdown(context.Background())
+	}()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := Execute(ctx, api.Task{TaskID: "task-1", Prompt: "ignored"})
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+
+	if err := tp.ForceFlush(context.Background()); err != nil {
+		t.Fatalf("force flush: %v", err)
+	}
+
+	spans := exp.GetSpans()
+	if len(spans) == 0 {
+		t.Fatalf("expected spans, got none")
+	}
+
+	foundCancelled := false
+	for _, s := range spans {
+		if s.Name != "silicon.task" {
+			continue
+		}
+		for _, ev := range s.Events {
+			if ev.Name == "task.cancelled" {
+				foundCancelled = true
+			}
+		}
+	}
+	if !foundCancelled {
+		t.Fatalf("expected task.cancelled event")
 	}
 }
