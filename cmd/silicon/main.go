@@ -5,11 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -29,7 +32,7 @@ var dotenvLoad = godotenv.Load
 // to call into the server without binding to a fixed port.
 func setup(ctx context.Context) (http.Handler, func(context.Context) error, error) {
 	if err := dotenvLoad(); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: loading .env: %v\n", err)
+		slog.Warn("loading .env", "err", err)
 	}
 
 	// initialize telemetry; fail-fast on error
@@ -241,19 +244,64 @@ func (s *server) handleLogs(w http.ResponseWriter, r *http.Request, id string) {
 }
 
 func main() {
+	// listen for termination signals
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
 	// perform setup; fail fast on telemetry init errors
-	handler, shutdown, err := setup(context.Background())
+	handler, shutdown, err := setup(ctx)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "telemetry init: %v\n", err)
+		slog.Error("telemetry init", "err", err)
 		os.Exit(1)
 	}
-	defer shutdown(context.Background())
 
 	// use default listen addr
 	addr := fmt.Sprintf("%s:%d", api.DefaultHost, api.DefaultPort)
-	fmt.Fprintf(os.Stderr, "silicon: listening on %s\n", addr)
-	if err := http.ListenAndServe(addr, handler); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		fmt.Fprintf(os.Stderr, "server: %v\n", err)
-		os.Exit(1)
+	slog.Info("starting", "addr", addr)
+
+	srv := &http.Server{Addr: addr, Handler: handler}
+
+	// start server
+	errCh := make(chan error, 1)
+	go func() {
+		// ListenAndServe returns http.ErrServerClosed on graceful shutdown.
+		errCh <- srv.ListenAndServe()
+	}()
+
+	// wait for termination signal or server error
+	select {
+	case <-ctx.Done():
+		// graceful shutdown requested
+		slog.Info("shutdown: signal received, shutting down server")
+
+		// first, stop accepting new connections and wait for in-flight requests
+		shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := srv.Shutdown(shutCtx); err != nil {
+			slog.Error("server shutdown failed", "err", err)
+		} else {
+			slog.Info("server shutdown complete")
+		}
+
+		// then flush telemetry
+		teleCtx, cancel2 := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel2()
+		if err := shutdown(teleCtx); err != nil {
+			slog.Error("telemetry shutdown failed", "err", err)
+		} else {
+			slog.Info("telemetry shutdown complete")
+		}
+
+	case err := <-errCh:
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			slog.Error("server error", "err", err)
+			// attempt to flush telemetry before exit
+			teleCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err2 := shutdown(teleCtx); err2 != nil {
+				slog.Error("telemetry shutdown failed", "err", err2)
+			}
+			os.Exit(1)
+		}
 	}
 }
